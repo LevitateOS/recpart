@@ -2,7 +2,7 @@ use crate::error::Result;
 use crate::exec::execute_plan;
 use crate::json::to_pretty_json;
 use crate::plan::build_plan_with_layout_request;
-use crate::preflight::query_disk_target;
+use crate::preflight::{list_disk_inventory, query_disk_target};
 use crate::types::{ApplyOptions, InstallMode, LayoutRequest};
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use std::path::PathBuf;
@@ -18,10 +18,19 @@ pub struct Cli {
 
 #[derive(Debug, Subcommand)]
 pub enum Commands {
+    /// Enumerate candidate target disks.
+    ListDisks(ListDisksArgs),
     /// Generate a deterministic partition plan.
     Plan(PlanArgs),
     /// Apply a partition plan directly to disk.
     Apply(ApplyArgs),
+}
+
+#[derive(Debug, Clone, Parser)]
+pub struct ListDisksArgs {
+    /// Emit machine-readable JSON
+    #[arg(long)]
+    pub json: bool,
 }
 
 #[derive(Debug, Clone, Parser)]
@@ -113,6 +122,7 @@ impl From<ModeArg> for InstallMode {
 impl Cli {
     pub fn json_requested(&self) -> bool {
         match &self.command {
+            Commands::ListDisks(args) => args.json,
             Commands::Plan(args) => args.json,
             Commands::Apply(args) => args.json,
         }
@@ -133,9 +143,35 @@ impl LayoutRequestArgs {
 
 pub fn run(cli: Cli) -> Result<()> {
     match cli.command {
+        Commands::ListDisks(args) => run_list_disks(args),
         Commands::Plan(args) => run_plan(args),
         Commands::Apply(args) => run_apply(args),
     }
+}
+
+fn run_list_disks(args: ListDisksArgs) -> Result<()> {
+    let inventory = list_disk_inventory()?;
+
+    if args.json {
+        println!("{}", to_pretty_json(&inventory)?);
+    } else {
+        println!("recpart candidate disks");
+        for disk in &inventory.disks {
+            println!("  {}", disk.path.display());
+            println!(
+                "    size: {} bytes (logical {} / physical {})",
+                disk.size_bytes, disk.logical_sector_bytes, disk.physical_sector_bytes
+            );
+            println!(
+                "    model: {} | transport: {} | read-only: {}",
+                disk.model,
+                disk.transport,
+                if disk.read_only { "yes" } else { "no" }
+            );
+        }
+    }
+
+    Ok(())
 }
 
 fn run_plan(args: PlanArgs) -> Result<()> {

@@ -40,3 +40,12 @@ fn apply_accepts_layout_request_flags() {
         _ => panic!("expected apply command"),
     }
 }
+
+#[test]
+fn list_disks_accepts_json_flag() {
+    let cli = Cli::parse_from(["recpart", "list-disks", "--json"]);
+    match cli.command {
+        Commands::ListDisks(args) => assert!(args.json),
+        _ => panic!("expected list-disks command"),
+    }
+}

@@ -6,6 +6,7 @@ pub const PLAN_SCHEMA_VERSION: u32 = 1;
 pub const APPLY_SCHEMA_VERSION: u32 = 1;
 pub const HANDOFF_SCHEMA_VERSION: u32 = 1;
 pub const ERROR_SCHEMA_VERSION: u32 = 1;
+pub const DISK_LIST_SCHEMA_VERSION: u32 = 1;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
@@ -30,6 +31,23 @@ pub struct DiskTarget {
     pub size_bytes: u64,
     pub logical_sector_bytes: u32,
     pub physical_sector_bytes: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DiskInventory {
+    pub path: PathBuf,
+    pub size_bytes: u64,
+    pub logical_sector_bytes: u32,
+    pub physical_sector_bytes: u32,
+    pub model: String,
+    pub transport: String,
+    pub read_only: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DiskListResult {
+    pub schema_version: u32,
+    pub disks: Vec<DiskInventory>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

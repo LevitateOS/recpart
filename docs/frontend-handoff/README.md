@@ -11,11 +11,15 @@ This directory defines the backend contract frontend/TUI consumers should use.
 
 ## Runtime Flows
 
-1. `plan` flow:
+1. `list-disks` flow:
+- Request disk inventory (`recpart list-disks --json`)
+- Render selectable disk cards from backend-provided metadata
+
+2. `plan` flow:
 - Request plan output (`recpart plan --json ...`)
 - Render partition summary + script preview
 
-2. `apply` flow:
+3. `apply` flow:
 - Request dry run first (`recpart apply --dry-run --json ...`)
 - Show steps + destructive confirmation UI
 - Execute real apply with confirmation token
@@ -25,5 +29,6 @@ This directory defines the backend contract frontend/TUI consumers should use.
 - `state-machine.md` - backend state/event contract for UI orchestration
 - `schemas/plan-result.schema.json`
 - `schemas/apply-result.schema.json`
+- `schemas/list-disks.schema.json`
 - `schemas/error.schema.json`
 - `examples/*.json` - sample payloads for frontend development

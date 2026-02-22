@@ -1,12 +1,53 @@
 use crate::error::{ErrorCode, RecpartError, Result};
-use crate::types::DiskTarget;
+use crate::types::{DiskInventory, DiskListResult, DiskTarget, DISK_LIST_SCHEMA_VERSION};
 use distro_spec::shared::{is_protected_path, is_root};
+use serde::Deserialize;
 use std::env;
 use std::fs;
 use std::os::unix::fs::FileTypeExt;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+
+#[derive(Debug, Deserialize)]
+struct LsblkListJson {
+    #[serde(default)]
+    blockdevices: Vec<LsblkDiskRow>,
+}
+
+#[derive(Debug, Deserialize)]
+struct LsblkDiskRow {
+    path: Option<String>,
+    #[serde(rename = "type")]
+    dev_type: Option<String>,
+    #[serde(default)]
+    model: Option<String>,
+    #[serde(default)]
+    tran: Option<String>,
+    #[serde(default)]
+    ro: Option<LsblkReadOnly>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum LsblkReadOnly {
+    Bool(bool),
+    Num(u8),
+    Text(String),
+}
+
+impl LsblkReadOnly {
+    fn is_read_only(&self) -> bool {
+        match self {
+            LsblkReadOnly::Bool(value) => *value,
+            LsblkReadOnly::Num(value) => *value != 0,
+            LsblkReadOnly::Text(value) => {
+                let normalized = value.trim().to_ascii_lowercase();
+                normalized == "1" || normalized == "true" || normalized == "yes"
+            }
+        }
+    }
+}
 
 pub const REQUIRED_TOOLS: &[&str] = &[
     "lsblk",
@@ -364,8 +405,27 @@ pub fn query_disk_target(path: &Path) -> Result<DiskTarget> {
 }
 
 pub fn list_candidate_disks() -> Result<Vec<DiskTarget>> {
+    Ok(list_disk_inventory()?
+        .disks
+        .into_iter()
+        .map(|disk| DiskTarget {
+            path: disk.path,
+            size_bytes: disk.size_bytes,
+            logical_sector_bytes: disk.logical_sector_bytes,
+            physical_sector_bytes: disk.physical_sector_bytes,
+        })
+        .collect())
+}
+
+pub fn list_disk_inventory() -> Result<DiskListResult> {
     let output = Command::new("lsblk")
-        .args(["-b", "-dn", "-o", "PATH,TYPE,SIZE,LOG-SEC,PHY-SEC"])
+        .args([
+            "-J",
+            "-b",
+            "-d",
+            "-o",
+            "PATH,TYPE,SIZE,LOG-SEC,PHY-SEC,MODEL,TRAN,RO",
+        ])
         .output()
         .map_err(|err| {
             RecpartError::new(
@@ -389,21 +449,54 @@ pub fn list_candidate_disks() -> Result<Vec<DiskTarget>> {
     }
 
     let stdout = String::from_utf8_lossy(&output.stdout);
+    let parsed: LsblkListJson = serde_json::from_str(&stdout).map_err(|err| {
+        RecpartError::new(
+            ErrorCode::InvalidTargetDisk,
+            "preflight",
+            "lsblk JSON output is parseable",
+            format!("failed to parse lsblk JSON: {err}"),
+            "Inspect 'lsblk -J -b -d -o PATH,TYPE,SIZE,LOG-SEC,PHY-SEC,MODEL,TRAN,RO' output.",
+        )
+    })?;
+
     let mut disks = Vec::new();
-    for line in stdout.lines() {
-        let mut cols = line.split_whitespace();
-        let Some(path) = cols.next() else { continue };
-        let Some(dev_type) = cols.next() else {
+    for row in parsed.blockdevices {
+        let Some(path) = row.path.as_deref() else { continue };
+        let Some(dev_type) = row.dev_type.as_deref() else {
             continue;
         };
         if !matches!(dev_type, "disk" | "loop") {
             continue;
         }
 
-        disks.push(query_disk_target(Path::new(path))?);
+        let target = query_disk_target(Path::new(path))?;
+        disks.push(DiskInventory {
+            path: target.path,
+            size_bytes: target.size_bytes,
+            logical_sector_bytes: target.logical_sector_bytes,
+            physical_sector_bytes: target.physical_sector_bytes,
+            model: row
+                .model
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .unwrap_or("unknown")
+                .to_string(),
+            transport: row
+                .tran
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .unwrap_or("unknown")
+                .to_string(),
+            read_only: row.ro.as_ref().is_some_and(LsblkReadOnly::is_read_only),
+        });
     }
 
     disks.sort_by(|a, b| a.path.cmp(&b.path));
     disks.dedup_by(|a, b| a.path == b.path);
-    Ok(disks)
+    Ok(DiskListResult {
+        schema_version: DISK_LIST_SCHEMA_VERSION,
+        disks,
+    })
 }

@@ -7,6 +7,11 @@ Partition planning and apply backend for LevitateOS install flows.
 `recpart` is responsible for partitioning, formatting, and mount orchestration only.
 It does not perform full OS installation.
 
+## Frontend
+
+`tools/recpart/frontend` provides an interactive TUI flow built with
+`@levitate/tui-kit` on top of backend JSON contracts.
+
 ## Goals
 
 - Provide a safe disk partition workflow for backend consumers.

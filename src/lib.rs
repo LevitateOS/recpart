@@ -12,6 +12,6 @@ pub use error::{ErrorCode, RecpartError, Result};
 pub use exec::{execute_plan, execute_plan_with_reporter};
 pub use plan::{build_plan, build_plan_with_layout_request};
 pub use types::{
-    ApplyOptions, ApplyResult, DiskTarget, HandoffPayload, InstallMode, LayoutRequest,
-    PartitionPlan, ResolvedLayout,
+    ApplyOptions, ApplyResult, DiskInventory, DiskListResult, DiskTarget, HandoffPayload,
+    InstallMode, LayoutRequest, PartitionPlan, ResolvedLayout,
 };

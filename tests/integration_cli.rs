@@ -20,6 +20,7 @@ fn help_shows_expected_commands() {
     assert!(output.status.success(), "help failed: {:?}", output.status);
 
     let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("list-disks"), "help missing list-disks command");
     assert!(stdout.contains("plan"), "help missing plan command");
     assert!(stdout.contains("apply"), "help missing apply command");
     assert!(
@@ -48,4 +49,21 @@ fn plan_json_error_contract_for_invalid_disk() {
         .as_str()
         .unwrap_or_default()
         .is_empty());
+}
+
+#[test]
+fn list_disks_json_contract_has_schema_and_array() {
+    let output = run_recpart(&["list-disks", "--json"]);
+
+    assert!(
+        output.status.success(),
+        "list-disks --json failed: status={:?} stderr={}",
+        output.status,
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let payload = parse_json(&stdout);
+    assert_eq!(payload["schema_version"], 1);
+    assert!(payload["disks"].is_array());
 }
