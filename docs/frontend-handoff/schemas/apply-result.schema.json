@@ -1,0 +1,88 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://levitateos.dev/schemas/recpart/apply-result.schema.json",
+  "title": "recpart apply result",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "mode",
+    "layout_request",
+    "resolved_layout",
+    "disk",
+    "dry_run",
+    "steps",
+    "partition_map",
+    "formatted_devices",
+    "mounted",
+    "handoff",
+    "warnings"
+  ],
+  "properties": {
+    "schema_version": { "type": "integer", "const": 1 },
+    "mode": { "type": "string", "enum": ["ab", "mutable"] },
+    "layout_request": { "$ref": "plan-result.schema.json#/properties/layout_request" },
+    "resolved_layout": { "$ref": "plan-result.schema.json#/properties/resolved_layout" },
+    "disk": { "$ref": "plan-result.schema.json#/properties/disk" },
+    "dry_run": { "type": "boolean" },
+    "steps": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["phase", "command", "program", "args", "dry_run"],
+        "properties": {
+          "phase": { "type": "string" },
+          "command": { "type": "string" },
+          "program": { "type": "string" },
+          "args": { "type": "array", "items": { "type": "string" } },
+          "status": { "type": ["integer", "null"] },
+          "stdout": { "type": ["string", "null"] },
+          "stderr": { "type": ["string", "null"] },
+          "dry_run": { "type": "boolean" }
+        }
+      }
+    },
+    "partition_map": { "$ref": "plan-result.schema.json#/properties/partitions" },
+    "formatted_devices": { "type": "array", "items": { "type": "string" } },
+    "mounted": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["path", "device"],
+        "properties": {
+          "path": { "type": "string" },
+          "device": { "type": "string" }
+        }
+      }
+    },
+    "handoff": {
+      "type": "object",
+      "required": [
+        "schema_version",
+        "mode",
+        "install_target",
+        "mount_map",
+        "next_commands",
+        "mode_context"
+      ],
+      "properties": {
+        "schema_version": { "type": "integer", "const": 1 },
+        "mode": { "type": "string", "enum": ["ab", "mutable"] },
+        "install_target": { "type": "string" },
+        "mount_map": { "$ref": "#/properties/mounted" },
+        "next_commands": { "type": "array", "items": { "type": "string" } },
+        "mode_context": {
+          "type": "object",
+          "required": ["notes"],
+          "properties": {
+            "install_target_slot": { "type": ["string", "null"] },
+            "inactive_slot_hint": { "type": ["string", "null"] },
+            "slot_a_device": { "type": ["string", "null"] },
+            "slot_b_device": { "type": ["string", "null"] },
+            "notes": { "type": "array", "items": { "type": "string" } }
+          }
+        }
+      }
+    },
+    "warnings": { "type": "array", "items": { "type": "string" } }
+  }
+}

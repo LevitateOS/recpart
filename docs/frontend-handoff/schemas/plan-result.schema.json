@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://levitateos.dev/schemas/recpart/plan-result.schema.json",
+  "title": "recpart plan result",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "mode",
+    "layout_request",
+    "resolved_layout",
+    "disk",
+    "partitions",
+    "sfdisk_script"
+  ],
+  "properties": {
+    "schema_version": { "type": "integer", "const": 1 },
+    "mode": { "type": "string", "enum": ["ab", "mutable"] },
+    "layout_request": {
+      "type": "object",
+      "properties": {
+        "efi_size_mb": { "type": ["integer", "null"], "minimum": 1 },
+        "root_size_mb": { "type": ["integer", "null"], "minimum": 1 },
+        "root_a_size_mb": { "type": ["integer", "null"], "minimum": 1 },
+        "root_b_size_mb": { "type": ["integer", "null"], "minimum": 1 },
+        "state_size_mb": { "type": ["integer", "null"], "minimum": 1 }
+      }
+    },
+    "resolved_layout": {
+      "type": "object",
+      "required": [
+        "mode",
+        "efi_size_mb",
+        "root_size_mb",
+        "root_a_size_mb",
+        "root_b_size_mb",
+        "state_size_mb"
+      ],
+      "properties": {
+        "mode": { "type": "string", "enum": ["ab", "mutable"] },
+        "efi_size_mb": { "type": "integer", "minimum": 1 },
+        "root_size_mb": { "type": ["integer", "null"], "minimum": 1 },
+        "root_a_size_mb": { "type": ["integer", "null"], "minimum": 1 },
+        "root_b_size_mb": { "type": ["integer", "null"], "minimum": 1 },
+        "state_size_mb": { "type": ["integer", "null"], "minimum": 1 }
+      }
+    },
+    "disk": {
+      "type": "object",
+      "required": ["path", "size_bytes", "logical_sector_bytes", "physical_sector_bytes"],
+      "properties": {
+        "path": { "type": "string" },
+        "size_bytes": { "type": "integer", "minimum": 1 },
+        "logical_sector_bytes": { "type": "integer", "minimum": 1 },
+        "physical_sector_bytes": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "partitions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["index", "name", "filesystem", "label", "gpt_type", "mountpoint"],
+        "properties": {
+          "index": { "type": "integer", "minimum": 1 },
+          "name": { "type": "string" },
+          "filesystem": { "type": "string" },
+          "label": { "type": "string" },
+          "gpt_type": { "type": "string" },
+          "size_mb": { "type": ["integer", "null"], "minimum": 1 },
+          "mountpoint": { "type": "string" }
+        }
+      }
+    },
+    "sfdisk_script": { "type": "string" }
+  }
+}

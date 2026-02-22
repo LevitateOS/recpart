@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "mode": "mutable",
+  "layout_request": {},
+  "resolved_layout": {
+    "mode": "mutable",
+    "efi_size_mb": 1024,
+    "root_size_mb": null,
+    "root_a_size_mb": null,
+    "root_b_size_mb": null,
+    "state_size_mb": null
+  },
+  "disk": {
+    "path": "/dev/vda",
+    "size_bytes": 268435456000,
+    "logical_sector_bytes": 512,
+    "physical_sector_bytes": 4096
+  },
+  "partitions": [
+    {"index": 1, "name": "efi", "filesystem": "vfat", "label": "EFI", "gpt_type": "U", "size_mb": 1024, "mountpoint": "/boot"},
+    {"index": 2, "name": "root", "filesystem": "ext4", "label": "ROOT", "gpt_type": "L", "size_mb": null, "mountpoint": "/"}
+  ],
+  "sfdisk_script": "label: gpt\n,1024M,U,*\n,,L\n"
+}

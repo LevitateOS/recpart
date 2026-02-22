@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "code": "E002",
+  "component": "preflight",
+  "expectation": "required tool 'sfdisk' exists in PATH",
+  "observed": "'sfdisk' is missing",
+  "remediation": "Install 'sfdisk' and re-run recpart."
+}

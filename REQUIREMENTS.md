@@ -311,3 +311,12 @@ Implementations SHOULD include conformance checks for:
 | `REQ-HANDOFF-001`, `REQ-HANDOFF-002`, `REQ-HANDOFF-010` | `tests/handoff.rs` | Next-step command output and structured result schema checks. |
 | `REQ-ERR-001`, `REQ-ERR-002`, `REQ-ERR-010` | `tests/errors.rs` | Stable exit codes, actionable diagnostics, and no failure masking. |
 | `REQ-SEC-001`, `REQ-SEC-002` | `tests/safety_confirm.rs` | Explicit destructive confirmation and ambiguous-target rejection. |
+
+### 11.4 Use-Case Scenarios
+
+Backend use-case scenarios are maintained in:
+
+- `tools/recpart/docs/use-cases.md`
+
+That document is normative for acceptance scenario coverage and maps scenario
+IDs (`UC-*`) to executable test targets.

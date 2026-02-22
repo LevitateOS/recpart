@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://levitateos.dev/schemas/recpart/error.schema.json",
+  "title": "recpart error payload",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "code",
+    "component",
+    "expectation",
+    "observed",
+    "remediation"
+  ],
+  "properties": {
+    "schema_version": { "type": "integer", "const": 1 },
+    "code": { "type": "string", "pattern": "^E[0-9]{3}$" },
+    "component": { "type": "string" },
+    "expectation": { "type": "string" },
+    "observed": { "type": "string" },
+    "remediation": { "type": "string" }
+  }
+}
