@@ -22,7 +22,10 @@ fn help_shows_expected_commands() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("plan"), "help missing plan command");
     assert!(stdout.contains("apply"), "help missing apply command");
-    assert!(stdout.contains("tui"), "help missing tui command");
+    assert!(
+        !stdout.contains(" tui"),
+        "help still includes removed tui command"
+    );
 }
 
 #[test]
@@ -45,20 +48,4 @@ fn plan_json_error_contract_for_invalid_disk() {
         .as_str()
         .unwrap_or_default()
         .is_empty());
-}
-
-#[test]
-fn tui_command_is_implemented() {
-    let output = run_recpart(&["tui"]);
-
-    assert_ne!(
-        output.status.code(),
-        Some(10),
-        "tui should not return E010 not-implemented"
-    );
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        !stderr.contains("backend-only phase"),
-        "stderr should not include backend-only limitation"
-    );
 }

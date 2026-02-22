@@ -6,7 +6,6 @@ pub mod json;
 pub mod plan;
 pub mod policy;
 pub mod preflight;
-pub mod tui;
 pub mod types;
 
 pub use error::{ErrorCode, RecpartError, Result};

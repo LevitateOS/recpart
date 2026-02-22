@@ -15,7 +15,6 @@ This document defines end-user and automation scenarios for `recpart` backend us
 | UC-007 | Reject protected mount root | any | `recpart apply ... --dry-run --mount-root /` | Non-zero result with mount safety error. | `tests/safety.rs::apply_rejects_protected_mount_root_even_in_dry_run` |
 | UC-008 | Require explicit confirmation for destructive apply | any | `recpart apply ...` (without `--confirm DESTROY`) | Non-zero result with `E004`. | `tests/confirmation.rs::apply_requires_confirmation_token_when_not_dry_run` |
 | UC-009 | Preserve deterministic plan output | any | repeat same `plan` command | byte-identical plan JSON/script output | `tests/plan_determinism.rs::same_input_produces_identical_plan` |
-| UC-010 | Interactive TUI command contract | N/A | `recpart tui` | Starts wizard flow (non-`E010`) and enforces interactive safety gates. | `tests/integration_cli.rs::tui_command_is_implemented` |
 
 ## How To Run Scenario Tests
 

@@ -1,6 +1,6 @@
 # recpart
 
-Partitioning wizard for LevitateOS install flows.
+Partition planning and apply backend for LevitateOS install flows.
 
 ## Scope
 
@@ -9,7 +9,7 @@ It does not perform full OS installation.
 
 ## Goals
 
-- Provide a safe TUI-guided disk partition workflow.
+- Provide a safe disk partition workflow for backend consumers.
 - Support two layout modes:
   - `ab` (default): A/B immutable-ready partition layout.
   - `mutable`: classic mutable root layout.
@@ -42,9 +42,6 @@ It does not perform full OS installation.
 - `exec` module:
   - command runner with structured logs
   - idempotent safety checks
-- `tui` module:
-  - reusable wizard screens
-  - confirmation and error panels
 
 ## Integration Contract
 

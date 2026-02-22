@@ -3,7 +3,6 @@ use crate::exec::execute_plan;
 use crate::json::to_pretty_json;
 use crate::plan::build_plan_with_layout_request;
 use crate::preflight::query_disk_target;
-use crate::tui::run_tui;
 use crate::types::{ApplyOptions, InstallMode, LayoutRequest};
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use std::path::PathBuf;
@@ -14,7 +13,7 @@ use std::path::PathBuf;
 #[command(about = "Mode-aware partition planning and apply backend")]
 pub struct Cli {
     #[command(subcommand)]
-    pub command: Option<Commands>,
+    pub command: Commands,
 }
 
 #[derive(Debug, Subcommand)]
@@ -23,8 +22,6 @@ pub enum Commands {
     Plan(PlanArgs),
     /// Apply a partition plan directly to disk.
     Apply(ApplyArgs),
-    /// Reserved frontend/TUI entrypoint.
-    Tui,
 }
 
 #[derive(Debug, Clone, Parser)]
@@ -116,9 +113,8 @@ impl From<ModeArg> for InstallMode {
 impl Cli {
     pub fn json_requested(&self) -> bool {
         match &self.command {
-            Some(Commands::Plan(args)) => args.json,
-            Some(Commands::Apply(args)) => args.json,
-            Some(Commands::Tui) | None => false,
+            Commands::Plan(args) => args.json,
+            Commands::Apply(args) => args.json,
         }
     }
 }
@@ -137,9 +133,8 @@ impl LayoutRequestArgs {
 
 pub fn run(cli: Cli) -> Result<()> {
     match cli.command {
-        Some(Commands::Plan(args)) => run_plan(args),
-        Some(Commands::Apply(args)) => run_apply(args),
-        Some(Commands::Tui) | None => run_tui(),
+        Commands::Plan(args) => run_plan(args),
+        Commands::Apply(args) => run_apply(args),
     }
 }
 

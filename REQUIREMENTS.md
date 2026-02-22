@@ -213,7 +213,6 @@ prints intended changes without modifying disk state.
 
 **REQ-CLI-001**: `recpart` MUST provide:
 
-- `recpart tui`
 - `recpart plan`
 - `recpart apply`
 

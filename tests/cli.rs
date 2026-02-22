@@ -5,7 +5,7 @@ use recpart::cli::{Cli, Commands, ModeArg};
 fn plan_mode_defaults_to_ab() {
     let cli = Cli::parse_from(["recpart", "plan", "--disk", "/dev/vda"]);
     match cli.command {
-        Some(Commands::Plan(args)) => assert!(matches!(args.mode, ModeArg::Ab)),
+        Commands::Plan(args) => assert!(matches!(args.mode, ModeArg::Ab)),
         _ => panic!("expected plan command"),
     }
 }
@@ -31,7 +31,7 @@ fn apply_accepts_layout_request_flags() {
     ]);
 
     match cli.command {
-        Some(Commands::Apply(args)) => {
+        Commands::Apply(args) => {
             assert_eq!(args.layout.efi_size_mb, Some(512));
             assert_eq!(args.layout.root_a_size_mb, Some(10_240));
             assert_eq!(args.layout.root_b_size_mb, Some(10_240));
