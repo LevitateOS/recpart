@@ -461,7 +461,9 @@ pub fn list_disk_inventory() -> Result<DiskListResult> {
 
     let mut disks = Vec::new();
     for row in parsed.blockdevices {
-        let Some(path) = row.path.as_deref() else { continue };
+        let Some(path) = row.path.as_deref() else {
+            continue;
+        };
         let Some(dev_type) = row.dev_type.as_deref() else {
             continue;
         };

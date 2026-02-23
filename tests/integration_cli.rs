@@ -20,7 +20,10 @@ fn help_shows_expected_commands() {
     assert!(output.status.success(), "help failed: {:?}", output.status);
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("list-disks"), "help missing list-disks command");
+    assert!(
+        stdout.contains("list-disks"),
+        "help missing list-disks command"
+    );
     assert!(stdout.contains("plan"), "help missing plan command");
     assert!(stdout.contains("apply"), "help missing apply command");
     assert!(
