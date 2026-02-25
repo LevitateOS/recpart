@@ -1,8 +1,13 @@
-# recpart frontend
+# recpart frontend (Deprecated Path)
 
-The interactive TUI frontend has been removed.
+Deprecated superproject path.
 
-Use the backend directly:
+Canonical Stage 03 owner:
+- `tui/apps/s03-install/disk-plan`
+
+Current status:
+- Interactive frontend flow is not implemented yet.
+- Use the backend directly:
 
 ```bash
 recpart plan --disk <disk> --mode ab --json
