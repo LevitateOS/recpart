@@ -9,8 +9,9 @@ It does not perform full OS installation.
 
 ## Frontend
 
-`tools/recpart/frontend` provides an interactive TUI flow built with
-`@levitate/tui-kit` on top of backend JSON contracts.
+The canonical interactive TUI flow lives at
+`tui/apps/s03-install/disk-plan`, built on `tui/kit/core` and recpart
+backend JSON contracts.
 
 ## Goals
 
