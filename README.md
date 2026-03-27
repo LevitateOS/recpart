@@ -10,7 +10,7 @@ It does not perform full OS installation.
 ## Frontend
 
 The canonical interactive TUI flow lives at
-`tui/apps/s03-install/disk-plan`, built on `tui/kit/core` and recpart
+`tui/apps/install/disk-plan`, built on `tui/kit/core` and recpart
 backend JSON contracts.
 
 ## Goals
