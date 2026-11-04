@@ -279,43 +279,12 @@ and MUST delegate that responsibility to dedicated policy tools (for example,
 
 ---
 
-## 11. Conformance and Traceability
+## 11. Validation
 
-### 11.1 Requirement IDs
+Unit tests are prohibited. Choose focused validation for the behavior being changed:
 
-**REQ-CONF-001**: All behavior tests SHOULD trace back to one or more
-`REQ-*` identifiers from this document.
+- `cargo check -p recpart` for compilation.
+- `cargo test -p recpart --test integration_cli` for the actual CLI and JSON contract.
+- `tests/e2e_real_disk.rs` for explicit checks on a designated throwaway disk; destructive runs retain their acknowledgement requirements.
 
-### 11.2 Minimum Conformance Coverage
-
-Implementations SHOULD include conformance checks for:
-
-- Mode defaulting (`REQ-MODE-001`)
-- Primary UI target behavior (`REQ-UI-001`, `REQ-UI-002`)
-- Deterministic plan generation (`REQ-DESIGN-010`)
-- Apply safety gates (`REQ-EXEC-001`, `REQ-EXEC-010`)
-- Handoff summary correctness (`REQ-HANDOFF-001`, `REQ-HANDOFF-010`)
-
-### 11.3 Traceability Matrix
-
-| Requirement | Planned Test Target | Notes |
-|-------------|---------------------|-------|
-| `REQ-MODE-001`, `REQ-MODE-002` | `tests/mode_defaults.rs` | Validate default `ab` and explicit `mutable` selection behavior. |
-| `REQ-DESIGN-010`, `REQ-DESIGN-011` | `tests/plan_determinism.rs` | Same input must produce byte-identical plan/script output. |
-| `REQ-UI-001`, `REQ-UI-002`, `REQ-UI-010`, `REQ-UI-011` | `tests/ui_layout.rs` | Snapshot/layout checks for `960x1080` target and minimum terminal handling. |
-| `REQ-EXEC-001`, `REQ-EXEC-002` | `tests/preflight.rs` | Missing disk/tools and invalid target rejection. |
-| `REQ-EXEC-010`, `REQ-EXEC-011`, `REQ-EXEC-012` | `tests/apply_flow.rs` | Ordered execution, fail-fast behavior, and recovery guidance assertions. |
-| `REQ-EXEC-020` | `tests/plan_only.rs` | Dry-run mode asserts no destructive commands executed. |
-| `REQ-CLI-001`, `REQ-CLI-010`, `REQ-CLI-011`, `REQ-CLI-020` | `tests/cli.rs` | Command surface, mode flags, defaults, and JSON output contract. |
-| `REQ-HANDOFF-001`, `REQ-HANDOFF-002`, `REQ-HANDOFF-010` | `tests/handoff.rs` | Next-step command output and structured result schema checks. |
-| `REQ-ERR-001`, `REQ-ERR-002`, `REQ-ERR-010` | `tests/errors.rs` | Stable exit codes, actionable diagnostics, and no failure masking. |
-| `REQ-SEC-001`, `REQ-SEC-002` | `tests/safety_confirm.rs` | Explicit destructive confirmation and ambiguous-target rejection. |
-
-### 11.4 Use-Case Scenarios
-
-Backend use-case scenarios are maintained in:
-
-- `tools/recpart/docs/use-cases.md`
-
-That document is normative for acceptance scenario coverage and maps scenario
-IDs (`UC-*`) to executable test targets.
+Use `docs/use-cases.md` for example workflows. No traceability matrix or minimum coverage gate is required during development.
