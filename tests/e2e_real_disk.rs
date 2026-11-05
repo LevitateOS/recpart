@@ -4,17 +4,21 @@ use std::path::Path;
 use std::process::Command;
 
 fn run_recpart(args: &[&str]) -> std::process::Output {
-    Command::new("cargo")
-        .args(["run", "-q", "-p", "recpart", "--"])
+    Command::new(env!("CARGO_BIN_EXE_recpart"))
         .args(args)
         .output()
-        .expect("recpart command should execute through cargo run")
+        .expect("the Cargo-built recpart binary should execute")
 }
 
-fn require_e2e_disk() -> Option<String> {
-    env::var("RECPART_E2E_DISK")
-        .ok()
-        .filter(|s| !s.trim().is_empty())
+fn require_e2e_disk() -> String {
+    let disk = env::var("RECPART_E2E_DISK").expect(
+        "recpart real-disk e2e: set RECPART_E2E_DISK=/dev/<throwaway-disk> before explicitly running --ignored tests",
+    );
+    assert!(
+        !disk.trim().is_empty(),
+        "RECPART_E2E_DISK must name a throwaway disk"
+    );
+    disk
 }
 
 fn parse_json(s: &str) -> Value {
@@ -24,10 +28,7 @@ fn parse_json(s: &str) -> Value {
 #[test]
 #[ignore = "requires real throwaway disk via RECPART_E2E_DISK"]
 fn e2e_plan_on_real_disk_json_contract() {
-    let Some(disk) = require_e2e_disk() else {
-        eprintln!("skip: set RECPART_E2E_DISK=/dev/<disk>");
-        return;
-    };
+    let disk = require_e2e_disk();
 
     let output = run_recpart(&["plan", "--disk", &disk, "--mode", "ab", "--json"]);
 
@@ -45,10 +46,7 @@ fn e2e_plan_on_real_disk_json_contract() {
 #[test]
 #[ignore = "requires real throwaway disk via RECPART_E2E_DISK"]
 fn e2e_apply_dry_run_on_real_disk_json_contract() {
-    let Some(disk) = require_e2e_disk() else {
-        eprintln!("skip: set RECPART_E2E_DISK=/dev/<disk>");
-        return;
-    };
+    let disk = require_e2e_disk();
 
     let mount_root = "/mnt/recpart-e2e";
     let output = run_recpart(&[
@@ -89,27 +87,27 @@ fn e2e_apply_dry_run_on_real_disk_json_contract() {
 #[test]
 #[ignore = "destructive: requires throwaway disk + root + RECPART_E2E_ALLOW_DESTRUCTIVE=YES_DESTROY"]
 fn e2e_apply_destructive_ab_mode() {
-    let Some(disk) = require_e2e_disk() else {
-        eprintln!("skip: set RECPART_E2E_DISK=/dev/<disk>");
-        return;
-    };
+    let disk = require_e2e_disk();
 
-    if env::var("RECPART_E2E_ALLOW_DESTRUCTIVE").ok().as_deref() != Some("YES_DESTROY") {
-        eprintln!("skip: set RECPART_E2E_ALLOW_DESTRUCTIVE=YES_DESTROY to run destructive e2e");
-        return;
-    }
+    assert_eq!(env::var("RECPART_E2E_ALLOW_DESTRUCTIVE").ok().as_deref(), Some("YES_DESTROY"),
+        "recpart destructive e2e: set RECPART_E2E_ALLOW_DESTRUCTIVE=YES_DESTROY for a designated throwaway disk");
 
     let uid_output = Command::new("id")
         .arg("-u")
         .output()
         .expect("id -u must execute");
+    assert!(
+        uid_output.status.success(),
+        "id -u failed: {}",
+        String::from_utf8_lossy(&uid_output.stderr)
+    );
     let uid = String::from_utf8_lossy(&uid_output.stdout)
         .trim()
         .to_string();
-    if uid != "0" {
-        eprintln!("skip: destructive e2e requires root");
-        return;
-    }
+    assert_eq!(
+        uid, "0",
+        "recpart destructive e2e requires root; explicitly rerun the acknowledged test with sudo"
+    );
 
     let mount_root = "/mnt/recpart-e2e-live";
     let output = run_recpart(&[
@@ -155,7 +153,15 @@ fn e2e_apply_destructive_ab_mode() {
         format!("{mount_root}/sysroot/state"),
         format!("{mount_root}/sysroot"),
     ] {
-        let _ = Command::new("umount").arg(&target).status();
+        let output = Command::new("umount")
+            .arg(&target)
+            .output()
+            .expect("umount should execute");
+        assert!(
+            output.status.success(),
+            "failed to unmount {target}; preserving mount directories: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
     }
 
     for dir in [
@@ -164,6 +170,11 @@ fn e2e_apply_destructive_ab_mode() {
         Path::new(mount_root).join("sysroot"),
         Path::new(mount_root).to_path_buf(),
     ] {
-        let _ = std::fs::remove_dir_all(dir);
+        std::fs::remove_dir(&dir).unwrap_or_else(|err| {
+            panic!(
+                "cannot remove unmounted test directory {}: {err}",
+                dir.display()
+            )
+        });
     }
 }

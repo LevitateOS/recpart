@@ -2,11 +2,10 @@ use serde_json::Value;
 use std::process::Command;
 
 fn run_recpart(args: &[&str]) -> std::process::Output {
-    Command::new("cargo")
-        .args(["run", "-q", "-p", "recpart", "--"])
+    Command::new(env!("CARGO_BIN_EXE_recpart"))
         .args(args)
         .output()
-        .expect("recpart command should execute through cargo run")
+        .expect("the Cargo-built recpart binary should execute")
 }
 
 fn parse_json(s: &str) -> Value {
