@@ -253,6 +253,107 @@ pub fn ensure_disk_not_mounted(path: &Path) -> Result<()> {
     ))
 }
 
+/// Refuse disks that something else is actively using even when nothing is
+/// mounted: device-mapper/LVM/md/dm-crypt holders, active swap, or another
+/// exclusive opener. `wipefs` runs without `--force`, so it also refuses busy
+/// devices; this check gives a clear error before anything is touched.
+pub fn ensure_disk_not_in_use(path: &Path) -> Result<()> {
+    let canonical = resolve_disk_path(path)?;
+    let disk_name = canonical
+        .file_name()
+        .map(|name| name.to_string_lossy().to_string())
+        .unwrap_or_default();
+    let sys_dir = Path::new("/sys/class/block").join(&disk_name);
+
+    let mut problems = Vec::new();
+    let mut device_names = vec![disk_name.clone()];
+    device_names.extend(partition_names(&sys_dir));
+
+    for name in &device_names {
+        let holders_dir = if *name == disk_name {
+            sys_dir.join("holders")
+        } else {
+            sys_dir.join(name).join("holders")
+        };
+        if let Ok(entries) = fs::read_dir(&holders_dir) {
+            for entry in entries.flatten() {
+                problems.push(format!(
+                    "/dev/{name} is held by {}",
+                    entry.file_name().to_string_lossy()
+                ));
+            }
+        }
+    }
+
+    if let Ok(swaps) = fs::read_to_string("/proc/swaps") {
+        for line in swaps.lines().skip(1) {
+            let Some(swap_dev) = line.split_whitespace().next() else {
+                continue;
+            };
+            let swap_path = fs::canonicalize(swap_dev).unwrap_or_else(|_| PathBuf::from(swap_dev));
+            let swap_name = swap_path
+                .file_name()
+                .map(|name| name.to_string_lossy().to_string())
+                .unwrap_or_default();
+            if device_names.contains(&swap_name) {
+                problems.push(format!("{} is active swap", swap_path.display()));
+            }
+        }
+    }
+
+    if problems.is_empty() {
+        if let Err(err) = open_exclusive(&canonical) {
+            problems.push(format!(
+                "exclusive open of {} failed: {err}",
+                canonical.display()
+            ));
+        }
+    }
+
+    if problems.is_empty() {
+        return Ok(());
+    }
+
+    Err(RecpartError::new(
+        ErrorCode::InvalidTargetDisk,
+        "preflight",
+        "target disk and its partitions are not in use (no holders, swap or exclusive openers)",
+        problems.join("; "),
+        "Deactivate LVM/md/dm-crypt users (vgchange -an, mdadm --stop, cryptsetup close), run swapoff, and close programs using the disk before destructive apply.",
+    ))
+}
+
+fn partition_names(disk_sys_dir: &Path) -> Vec<String> {
+    let Ok(entries) = fs::read_dir(disk_sys_dir) else {
+        return Vec::new();
+    };
+    entries
+        .flatten()
+        .filter(|entry| entry.path().join("partition").exists())
+        .map(|entry| entry.file_name().to_string_lossy().to_string())
+        .collect()
+}
+
+/// Sorted names of the partitions the kernel currently exposes for `disk`.
+pub fn kernel_partition_names(disk: &Path) -> Vec<String> {
+    let name = disk
+        .file_name()
+        .map(|name| name.to_string_lossy().to_string())
+        .unwrap_or_default();
+    let mut names = partition_names(&Path::new("/sys/class/block").join(name));
+    names.sort();
+    names
+}
+
+fn open_exclusive(path: &Path) -> std::io::Result<()> {
+    use std::os::unix::fs::OpenOptionsExt;
+    fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_EXCL)
+        .open(path)
+        .map(drop)
+}
+
 pub fn ensure_disk_writable(path: &Path) -> Result<()> {
     let output = Command::new("lsblk")
         .args(["-dn", "-o", "RO", &path.to_string_lossy()])
@@ -471,7 +572,20 @@ pub fn list_disk_inventory() -> Result<DiskListResult> {
             continue;
         }
 
-        let target = query_disk_target(Path::new(path))?;
+        if Path::new(path)
+            .file_name()
+            .is_some_and(|name| name.to_string_lossy().starts_with("zram"))
+        {
+            continue;
+        }
+
+        let target = match query_disk_target(Path::new(path)) {
+            Ok(target) => target,
+            Err(err) => {
+                eprintln!("recpart: warning: skipping {path}: {err}");
+                continue;
+            }
+        };
         disks.push(DiskInventory {
             path: target.path,
             size_bytes: target.size_bytes,

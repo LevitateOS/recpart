@@ -2,8 +2,8 @@ use crate::error::{ErrorCode, RecpartError, Result};
 use crate::handoff::build_handoff;
 use crate::plan::partition_device;
 use crate::preflight::{
-    ensure_block_device, ensure_disk_not_mounted, ensure_disk_writable, ensure_mount_root_safe,
-    ensure_required_tools, ensure_root_for_apply,
+    ensure_block_device, ensure_disk_not_in_use, ensure_disk_not_mounted, ensure_disk_writable,
+    ensure_mount_root_safe, ensure_required_tools, ensure_root_for_apply, kernel_partition_names,
 };
 use crate::types::{
     ApplyOptions, ApplyResult, CommandRecord, InstallMode, MountMapping, PartitionPlan,
@@ -30,6 +30,11 @@ enum ExecutionAction {
         phase: String,
         path: PathBuf,
     },
+    /// Wait for the kernel to expose exactly the planned partitions of the
+    /// target disk. Runs once, after the new table is written and udev settled.
+    VerifyPartitions {
+        phase: String,
+    },
 }
 
 pub fn execute_plan(plan: &PartitionPlan, opts: &ApplyOptions) -> Result<ApplyResult> {
@@ -50,6 +55,7 @@ pub fn execute_plan_with_reporter(
         ensure_block_device(&plan.disk.path)?;
         ensure_disk_writable(&plan.disk.path)?;
         ensure_disk_not_mounted(&plan.disk.path)?;
+        ensure_disk_not_in_use(&plan.disk.path)?;
     }
 
     let actions = build_apply_actions(plan, &opts.mount_root);
@@ -89,8 +95,19 @@ pub fn execute_plan_with_reporter(
     }
 
     let mut records = Vec::with_capacity(actions.len());
+    let mut mounted_targets: Vec<String> = Vec::new();
     for action in &actions {
-        let record = run_action(action, plan, &opts.mount_root)?;
+        let record = match run_action(action, plan, &opts.mount_root) {
+            Ok(record) => record,
+            Err(err) => return Err(rollback_mounts(err, &mounted_targets)),
+        };
+        if let ExecutionAction::Run { program, args, .. } = action {
+            if program == "mount" {
+                if let Some(target) = args.last() {
+                    mounted_targets.push(target.clone());
+                }
+            }
+        }
         if let Some(cb) = reporter.as_deref_mut() {
             cb(&record);
         }
@@ -113,6 +130,43 @@ pub fn execute_plan_with_reporter(
     })
 }
 
+/// Unmount everything this run mounted (reverse order) after a failure and
+/// fold the outcome into the returned error.
+fn rollback_mounts(mut err: RecpartError, mounted_targets: &[String]) -> RecpartError {
+    if mounted_targets.is_empty() {
+        return err;
+    }
+
+    let mut failed = Vec::new();
+    for target in mounted_targets.iter().rev() {
+        let ok = Command::new("umount")
+            .arg(target)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .map(|status| status.success())
+            .unwrap_or(false);
+        if !ok {
+            failed.push(target.clone());
+        }
+    }
+
+    if failed.is_empty() {
+        err.observed = format!(
+            "{}; rolled back mounts: {}",
+            err.observed,
+            mounted_targets.join(", ")
+        );
+    } else {
+        err.observed = format!(
+            "{}; rollback could not unmount: {}",
+            err.observed,
+            failed.join(", ")
+        );
+    }
+    err
+}
+
 fn ensure_confirmation(token: Option<&str>) -> Result<()> {
     if matches!(token, Some(CONFIRM_TOKEN)) {
         return Ok(());
@@ -128,32 +182,31 @@ fn ensure_confirmation(token: Option<&str>) -> Result<()> {
 }
 
 fn build_apply_actions(plan: &PartitionPlan, mount_root: &Path) -> Vec<ExecutionAction> {
-    let mut actions = Vec::new();
-
-    actions.push(ExecutionAction::Run {
-        phase: "partition".to_string(),
-        program: "wipefs".to_string(),
-        args: vec![
-            "-a".to_string(),
-            "--force".to_string(),
-            plan.disk.path.to_string_lossy().to_string(),
-        ],
-        stdin: None,
-    });
-
-    actions.push(ExecutionAction::Run {
-        phase: "partition".to_string(),
-        program: "sfdisk".to_string(),
-        args: vec![plan.disk.path.to_string_lossy().to_string()],
-        stdin: Some(plan.sfdisk_script.clone()),
-    });
-
-    actions.push(ExecutionAction::Run {
-        phase: "partition".to_string(),
-        program: "udevadm".to_string(),
-        args: vec!["settle".to_string(), "--timeout=10".to_string()],
-        stdin: None,
-    });
+    let disk = plan.disk.path.to_string_lossy().to_string();
+    let mut actions = vec![
+        ExecutionAction::Run {
+            phase: "partition".to_string(),
+            program: "wipefs".to_string(),
+            // No --force: wipefs then refuses devices that are busy.
+            args: vec!["-a".to_string(), disk.clone()],
+            stdin: None,
+        },
+        ExecutionAction::Run {
+            phase: "partition".to_string(),
+            program: "sfdisk".to_string(),
+            args: vec![disk],
+            stdin: Some(plan.sfdisk_script.clone()),
+        },
+        ExecutionAction::Run {
+            phase: "partition".to_string(),
+            program: "udevadm".to_string(),
+            args: vec!["settle".to_string(), "--timeout=10".to_string()],
+            stdin: None,
+        },
+        ExecutionAction::VerifyPartitions {
+            phase: "partition".to_string(),
+        },
+    ];
 
     let efi = partition_device(&plan.disk.path, 1);
     actions.push(ExecutionAction::Run {
@@ -334,11 +387,24 @@ fn run_action(
 
             Ok(CommandRecord {
                 phase: phase.clone(),
-                command: format!("mkdir -p {}", path.display()),
+                command: action.rendered(),
                 program: "mkdir".to_string(),
                 args: vec!["-p".to_string(), path.to_string_lossy().to_string()],
                 status: Some(0),
                 stdout: None,
+                stderr: None,
+                dry_run: false,
+            })
+        }
+        ExecutionAction::VerifyPartitions { phase } => {
+            let found = wait_for_partition_devices(plan, Duration::from_secs(10))?;
+            Ok(CommandRecord {
+                phase: phase.clone(),
+                command: action.rendered(),
+                program: action.program_name().to_string(),
+                args: action.args(),
+                status: Some(0),
+                stdout: Some(found.join(" ")),
                 stderr: None,
                 dry_run: false,
             })
@@ -410,10 +476,6 @@ fn run_action(
                 ));
             }
 
-            if phase == "partition" {
-                wait_for_partition_devices(&formatted_devices(plan), Duration::from_secs(8))?;
-            }
-
             Ok(CommandRecord {
                 phase: phase.clone(),
                 command: action.rendered(),
@@ -445,30 +507,50 @@ fn classify_phase_error(phase: &str) -> ErrorCode {
     }
 }
 
-fn wait_for_partition_devices(devices: &[String], timeout: Duration) -> Result<()> {
+/// Wait until the kernel exposes exactly the planned partitions as children of
+/// the target disk, and each planned device node exists. Returns the kernel's
+/// partition names.
+fn wait_for_partition_devices(plan: &PartitionPlan, timeout: Duration) -> Result<Vec<String>> {
+    let devices = formatted_devices(plan);
+    let expected: Vec<String> = {
+        let mut names: Vec<String> = devices
+            .iter()
+            .filter_map(|dev| Path::new(dev).file_name())
+            .map(|name| name.to_string_lossy().to_string())
+            .collect();
+        names.sort();
+        names
+    };
+
     let start = Instant::now();
     loop {
-        let missing = devices
+        let kernel = kernel_partition_names(&plan.disk.path);
+        let missing_nodes = devices
             .iter()
             .filter(|dev| !Path::new(dev.as_str()).exists())
             .cloned()
             .collect::<Vec<_>>();
 
-        if missing.is_empty() {
-            return Ok(());
+        if kernel == expected && missing_nodes.is_empty() {
+            return Ok(kernel);
         }
 
         if start.elapsed() >= timeout {
             return Err(RecpartError::new(
                 ErrorCode::PartitionApplyFailed,
                 "exec",
-                "partition devices appear after partition table write",
                 format!(
-                    "missing devices after {:?}: {}",
-                    timeout,
-                    missing.join(", ")
+                    "kernel exposes exactly the planned partitions of {}: {}",
+                    plan.disk.path.display(),
+                    expected.join(", ")
                 ),
-                "Wait for udev to settle, verify kernel sees the new partition table, then retry.",
+                format!(
+                    "after {:?}: kernel partitions [{}], missing device nodes [{}]",
+                    timeout,
+                    kernel.join(", "),
+                    missing_nodes.join(", ")
+                ),
+                "Check dmesg for partition table errors, run 'partprobe' or 'udevadm settle', then retry.",
             ));
         }
 
@@ -481,6 +563,7 @@ impl ExecutionAction {
         match self {
             ExecutionAction::Run { phase, .. } => phase,
             ExecutionAction::CreateDir { phase, .. } => phase,
+            ExecutionAction::VerifyPartitions { phase } => phase,
         }
     }
 
@@ -494,6 +577,9 @@ impl ExecutionAction {
                 }
             }
             ExecutionAction::CreateDir { path, .. } => format!("mkdir -p {}", path.display()),
+            ExecutionAction::VerifyPartitions { .. } => {
+                "verify-partitions (kernel exposes planned partitions)".to_string()
+            }
         }
     }
 
@@ -501,6 +587,7 @@ impl ExecutionAction {
         match self {
             ExecutionAction::Run { program, .. } => program,
             ExecutionAction::CreateDir { .. } => "mkdir",
+            ExecutionAction::VerifyPartitions { .. } => "verify-partitions",
         }
     }
 
@@ -510,6 +597,7 @@ impl ExecutionAction {
             ExecutionAction::CreateDir { path, .. } => {
                 vec!["-p".to_string(), path.to_string_lossy().to_string()]
             }
+            ExecutionAction::VerifyPartitions { .. } => Vec::new(),
         }
     }
 }
