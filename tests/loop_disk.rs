@@ -75,7 +75,7 @@ fn ab_layout_is_planned_applied_and_handed_off() {
             ("EFI", "vfat".to_string(), "/boot"),
             ("ROOT_A", "ext4".to_string(), "/"),
             ("ROOT_B", "ext4".to_string(), "none"),
-            ("STATE", "ext4".to_string(), "/state"),
+            ("STATE", "ext4".to_string(), "/var"),
         ]
     );
 
