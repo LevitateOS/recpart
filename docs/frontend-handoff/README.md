@@ -28,5 +28,5 @@ This directory defines the backend contract frontend/TUI consumers should use.
 
 - `schemas/*.schema.json` - JSON Schemas of `list-disks`, `plan`, `apply` and
   error output, generated from recpart's output types (`src/types.rs`) by
-  `cargo xtask contracts` in the LevitateOS workspace, which also writes the
+  `cargo xtask gen` in the LevitateOS workspace, which also writes the
   disk-plan TUI's TypeScript declarations. Do not edit them by hand.
