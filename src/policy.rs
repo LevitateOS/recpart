@@ -140,7 +140,7 @@ pub fn build_templates(layout: &ResolvedLayout) -> Vec<PartitionTemplate> {
                 gpt_type: "L".to_string(),
                 bootable: false,
                 size_mb: layout.state_size_mb,
-                mountpoint: "/state".to_string(),
+                mountpoint: "/var".to_string(),
             },
         ],
         InstallMode::Mutable => vec![
