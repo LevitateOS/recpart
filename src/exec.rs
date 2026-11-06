@@ -8,7 +8,7 @@ use crate::preflight::{
 };
 use crate::types::{
     ApplyOptions, ApplyResult, CommandRecord, MountMapping, PartitionPlan, PartitionTemplate,
-    APPLY_SCHEMA_VERSION,
+    APPLY_SCHEMA_VERSION, CONFIRM_TOKEN,
 };
 use std::fs;
 use std::io::Write;
@@ -17,7 +17,6 @@ use std::process::{Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 
-const CONFIRM_TOKEN: &str = "DESTROY";
 
 /// The three stages of apply; a failure is reported with its stage's code.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

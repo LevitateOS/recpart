@@ -1,8 +1,62 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://levitateos.dev/schemas/recpart/apply-result.schema.json",
-  "title": "recpart apply result",
+  "title": "ApplyResult",
   "type": "object",
+  "properties": {
+    "disk": {
+      "$ref": "#/$defs/DiskTarget"
+    },
+    "dry_run": {
+      "type": "boolean"
+    },
+    "formatted_devices": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "handoff": {
+      "$ref": "#/$defs/HandoffPayload"
+    },
+    "layout_request": {
+      "$ref": "#/$defs/LayoutRequest"
+    },
+    "mode": {
+      "$ref": "#/$defs/InstallMode"
+    },
+    "mounted": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/MountMapping"
+      }
+    },
+    "partition_map": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/PartitionTemplate"
+      }
+    },
+    "resolved_layout": {
+      "$ref": "#/$defs/ResolvedLayout"
+    },
+    "schema_version": {
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0
+    },
+    "steps": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/CommandRecord"
+      }
+    },
+    "warnings": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
   "required": [
     "schema_version",
     "mode",
@@ -17,45 +71,115 @@
     "handoff",
     "warnings"
   ],
-  "properties": {
-    "schema_version": { "type": "integer", "const": 1 },
-    "mode": { "type": "string", "enum": ["ab", "mutable"] },
-    "layout_request": { "$ref": "plan-result.schema.json#/properties/layout_request" },
-    "resolved_layout": { "$ref": "plan-result.schema.json#/properties/resolved_layout" },
-    "disk": { "$ref": "plan-result.schema.json#/properties/disk" },
-    "dry_run": { "type": "boolean" },
-    "steps": {
-      "type": "array",
-      "items": {
-        "type": "object",
-        "required": ["phase", "command", "program", "args", "dry_run"],
-        "properties": {
-          "phase": { "type": "string" },
-          "command": { "type": "string" },
-          "program": { "type": "string" },
-          "args": { "type": "array", "items": { "type": "string" } },
-          "status": { "type": ["integer", "null"] },
-          "stdout": { "type": ["string", "null"] },
-          "stderr": { "type": ["string", "null"] },
-          "dry_run": { "type": "boolean" }
-        }
-      }
-    },
-    "partition_map": { "$ref": "plan-result.schema.json#/properties/partitions" },
-    "formatted_devices": { "type": "array", "items": { "type": "string" } },
-    "mounted": {
-      "type": "array",
-      "items": {
-        "type": "object",
-        "required": ["path", "device"],
-        "properties": {
-          "path": { "type": "string" },
-          "device": { "type": "string" }
-        }
-      }
-    },
-    "handoff": {
+  "$defs": {
+    "CommandRecord": {
       "type": "object",
+      "properties": {
+        "args": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "command": {
+          "type": "string"
+        },
+        "dry_run": {
+          "type": "boolean"
+        },
+        "phase": {
+          "type": "string"
+        },
+        "program": {
+          "type": "string"
+        },
+        "status": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "int32"
+        },
+        "stderr": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "stdout": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "phase",
+        "command",
+        "program",
+        "args",
+        "dry_run"
+      ]
+    },
+    "DiskTarget": {
+      "type": "object",
+      "properties": {
+        "logical_sector_bytes": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "path": {
+          "type": "string"
+        },
+        "physical_sector_bytes": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "size_bytes": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "path",
+        "size_bytes",
+        "logical_sector_bytes",
+        "physical_sector_bytes"
+      ]
+    },
+    "HandoffPayload": {
+      "type": "object",
+      "properties": {
+        "install_target": {
+          "type": "string"
+        },
+        "mode": {
+          "$ref": "#/$defs/InstallMode"
+        },
+        "mode_context": {
+          "$ref": "#/$defs/ModeContext"
+        },
+        "mount_map": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/MountMapping"
+          }
+        },
+        "next_commands": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "schema_version": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        }
+      },
       "required": [
         "schema_version",
         "mode",
@@ -63,26 +187,209 @@
         "mount_map",
         "next_commands",
         "mode_context"
-      ],
+      ]
+    },
+    "InstallMode": {
+      "type": "string",
+      "enum": [
+        "ab",
+        "mutable"
+      ]
+    },
+    "LayoutRequest": {
+      "description": "Partition sizes the caller asked for; unset sizes take the policy default.\nThe fields are also recpart's `--<field>` CLI flags.",
+      "type": "object",
       "properties": {
-        "schema_version": { "type": "integer", "const": 1 },
-        "mode": { "type": "string", "enum": ["ab", "mutable"] },
-        "install_target": { "type": "string" },
-        "mount_map": { "$ref": "#/properties/mounted" },
-        "next_commands": { "type": "array", "items": { "type": "string" } },
-        "mode_context": {
-          "type": "object",
-          "required": ["notes"],
-          "properties": {
-            "install_target_slot": { "type": ["string", "null"] },
-            "inactive_slot_hint": { "type": ["string", "null"] },
-            "slot_a_device": { "type": ["string", "null"] },
-            "slot_b_device": { "type": ["string", "null"] },
-            "notes": { "type": "array", "items": { "type": "string" } }
-          }
+        "efi_size_mb": {
+          "description": "EFI partition size in MB",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0
+        },
+        "root_a_size_mb": {
+          "description": "A/B slot A partition size in MB (ab mode only)",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0
+        },
+        "root_b_size_mb": {
+          "description": "A/B slot B partition size in MB (ab mode only)",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0
+        },
+        "root_size_mb": {
+          "description": "Mutable root partition size in MB (mutable mode only)",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0
+        },
+        "state_size_mb": {
+          "description": "A/B state partition size in MB (ab mode only). Omit to use remaining space.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0
         }
       }
     },
-    "warnings": { "type": "array", "items": { "type": "string" } }
+    "ModeContext": {
+      "type": "object",
+      "properties": {
+        "inactive_slot_hint": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "install_target_slot": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "notes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "slot_a_device": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "slot_b_device": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "notes"
+      ]
+    },
+    "MountMapping": {
+      "type": "object",
+      "properties": {
+        "device": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "device"
+      ]
+    },
+    "PartitionTemplate": {
+      "type": "object",
+      "properties": {
+        "filesystem": {
+          "type": "string"
+        },
+        "gpt_type": {
+          "type": "string"
+        },
+        "index": {
+          "type": "integer",
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0
+        },
+        "label": {
+          "type": "string"
+        },
+        "mountpoint": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "size_mb": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "index",
+        "name",
+        "filesystem",
+        "label",
+        "gpt_type",
+        "mountpoint"
+      ]
+    },
+    "ResolvedLayout": {
+      "type": "object",
+      "properties": {
+        "efi_size_mb": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "mode": {
+          "$ref": "#/$defs/InstallMode"
+        },
+        "root_a_size_mb": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0
+        },
+        "root_b_size_mb": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0
+        },
+        "root_size_mb": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0
+        },
+        "state_size_mb": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "mode",
+        "efi_size_mb"
+      ]
+    }
   }
 }

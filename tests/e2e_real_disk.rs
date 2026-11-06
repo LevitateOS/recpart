@@ -119,7 +119,7 @@ fn e2e_apply_destructive_ab_mode() {
         "--mount-root",
         mount_root,
         "--confirm",
-        "DESTROY",
+        recpart::types::CONFIRM_TOKEN,
         "--json",
     ]);
 

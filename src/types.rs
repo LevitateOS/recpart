@@ -8,6 +8,10 @@ pub const HANDOFF_SCHEMA_VERSION: u32 = 1;
 pub const ERROR_SCHEMA_VERSION: u32 = 1;
 pub const DISK_LIST_SCHEMA_VERSION: u32 = 1;
 
+/// The `--confirm` value destructive apply requires.
+pub const CONFIRM_TOKEN: &str = "DESTROY";
+
+#[cfg_attr(feature = "contracts", derive(schemars::JsonSchema, ts_rs::TS))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, clap::ValueEnum)]
 #[serde(rename_all = "snake_case")]
 pub enum InstallMode {
@@ -25,6 +29,7 @@ impl fmt::Display for InstallMode {
     }
 }
 
+#[cfg_attr(feature = "contracts", derive(schemars::JsonSchema, ts_rs::TS))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DiskTarget {
     pub path: PathBuf,
@@ -33,21 +38,29 @@ pub struct DiskTarget {
     pub physical_sector_bytes: u32,
 }
 
+#[cfg_attr(feature = "contracts", derive(schemars::JsonSchema, ts_rs::TS))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DiskInventory {
     #[serde(flatten)]
     pub target: DiskTarget,
     pub model: String,
+    pub vendor: String,
+    pub serial: String,
     pub transport: String,
+    /// Spinning disk; `false` for SSDs and virtual disks.
+    pub rotational: bool,
+    pub removable: bool,
     pub read_only: bool,
 }
 
+#[cfg_attr(feature = "contracts", derive(schemars::JsonSchema, ts_rs::TS))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DiskListResult {
     pub schema_version: u32,
     pub disks: Vec<DiskInventory>,
 }
 
+#[cfg_attr(feature = "contracts", derive(schemars::JsonSchema, ts_rs::TS))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PartitionTemplate {
     pub index: u8,
@@ -59,6 +72,7 @@ pub struct PartitionTemplate {
     pub mountpoint: String,
 }
 
+#[cfg_attr(feature = "contracts", derive(schemars::JsonSchema, ts_rs::TS))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PartitionPlan {
     pub schema_version: u32,
@@ -72,6 +86,7 @@ pub struct PartitionPlan {
 
 /// Partition sizes the caller asked for; unset sizes take the policy default.
 /// The fields are also recpart's `--<field>` CLI flags.
+#[cfg_attr(feature = "contracts", derive(schemars::JsonSchema, ts_rs::TS))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default, clap::Args)]
 pub struct LayoutRequest {
     /// EFI partition size in MB
@@ -91,6 +106,7 @@ pub struct LayoutRequest {
     pub state_size_mb: Option<u32>,
 }
 
+#[cfg_attr(feature = "contracts", derive(schemars::JsonSchema, ts_rs::TS))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ResolvedLayout {
     pub mode: InstallMode,
@@ -108,12 +124,14 @@ pub struct ApplyOptions {
     pub mount_root: PathBuf,
 }
 
+#[cfg_attr(feature = "contracts", derive(schemars::JsonSchema, ts_rs::TS))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MountMapping {
     pub path: String,
     pub device: String,
 }
 
+#[cfg_attr(feature = "contracts", derive(schemars::JsonSchema, ts_rs::TS))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ModeContext {
     pub install_target_slot: Option<String>,
@@ -123,6 +141,7 @@ pub struct ModeContext {
     pub notes: Vec<String>,
 }
 
+#[cfg_attr(feature = "contracts", derive(schemars::JsonSchema, ts_rs::TS))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HandoffPayload {
     pub schema_version: u32,
@@ -133,6 +152,7 @@ pub struct HandoffPayload {
     pub mode_context: ModeContext,
 }
 
+#[cfg_attr(feature = "contracts", derive(schemars::JsonSchema, ts_rs::TS))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CommandRecord {
     pub phase: String,
@@ -145,6 +165,7 @@ pub struct CommandRecord {
     pub dry_run: bool,
 }
 
+#[cfg_attr(feature = "contracts", derive(schemars::JsonSchema, ts_rs::TS))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ApplyResult {
     pub schema_version: u32,
@@ -161,6 +182,7 @@ pub struct ApplyResult {
     pub warnings: Vec<String>,
 }
 
+#[cfg_attr(feature = "contracts", derive(schemars::JsonSchema, ts_rs::TS))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ErrorPayload {
     pub schema_version: u32,

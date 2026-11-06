@@ -27,8 +27,7 @@ This directory defines the backend contract frontend/TUI consumers should use.
 ## Primary Files
 
 - `state-machine.md` - backend state/event contract for UI orchestration
-- `schemas/plan-result.schema.json`
-- `schemas/apply-result.schema.json`
-- `schemas/list-disks.schema.json`
-- `schemas/error.schema.json`
-- `examples/*.json` - sample payloads for frontend development
+- `schemas/*.schema.json` - JSON Schemas of `list-disks`, `plan`, `apply` and
+  error output, generated from recpart's output types (`src/types.rs`) by
+  `cargo xtask contracts` in the LevitateOS workspace, which also writes the
+  disk-plan TUI's TypeScript declarations. Do not edit them by hand.

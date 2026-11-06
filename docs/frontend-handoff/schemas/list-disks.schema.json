@@ -1,34 +1,82 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://levitateos.dev/schemas/recpart/list-disks.schema.json",
-  "title": "recpart list-disks result",
+  "title": "DiskListResult",
   "type": "object",
-  "required": ["schema_version", "disks"],
   "properties": {
-    "schema_version": { "type": "integer", "const": 1 },
     "disks": {
       "type": "array",
       "items": {
-        "type": "object",
-        "required": [
-          "path",
-          "size_bytes",
-          "logical_sector_bytes",
-          "physical_sector_bytes",
-          "model",
-          "transport",
-          "read_only"
-        ],
-        "properties": {
-          "path": { "type": "string" },
-          "size_bytes": { "type": "integer", "minimum": 1 },
-          "logical_sector_bytes": { "type": "integer", "minimum": 1 },
-          "physical_sector_bytes": { "type": "integer", "minimum": 1 },
-          "model": { "type": "string" },
-          "transport": { "type": "string" },
-          "read_only": { "type": "boolean" }
-        }
+        "$ref": "#/$defs/DiskInventory"
       }
+    },
+    "schema_version": {
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0
+    }
+  },
+  "required": [
+    "schema_version",
+    "disks"
+  ],
+  "$defs": {
+    "DiskInventory": {
+      "type": "object",
+      "properties": {
+        "logical_sector_bytes": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "model": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "physical_sector_bytes": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "read_only": {
+          "type": "boolean"
+        },
+        "removable": {
+          "type": "boolean"
+        },
+        "rotational": {
+          "description": "Spinning disk; `false` for SSDs and virtual disks.",
+          "type": "boolean"
+        },
+        "serial": {
+          "type": "string"
+        },
+        "size_bytes": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "transport": {
+          "type": "string"
+        },
+        "vendor": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "size_bytes",
+        "logical_sector_bytes",
+        "physical_sector_bytes",
+        "model",
+        "vendor",
+        "serial",
+        "transport",
+        "rotational",
+        "removable",
+        "read_only"
+      ]
     }
   }
 }

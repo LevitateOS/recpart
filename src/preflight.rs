@@ -13,7 +13,7 @@ use std::process::Command;
 const SYS_BLOCK: &str = "/sys/class/block";
 
 /// The columns recpart reads for a disk, in one `lsblk -J` query.
-const DISK_COLUMNS: &str = "PATH,TYPE,SIZE,LOG-SEC,PHY-SEC,MODEL,TRAN,RO";
+const DISK_COLUMNS: &str = "PATH,TYPE,SIZE,LOG-SEC,PHY-SEC,MODEL,VENDOR,SERIAL,TRAN,ROTA,RM,RO";
 
 #[derive(Debug, Deserialize)]
 struct LsblkJson {
@@ -32,7 +32,11 @@ struct LsblkDisk {
     #[serde(rename = "phy-sec")]
     phy_sec: u32,
     model: Option<String>,
+    vendor: Option<String>,
+    serial: Option<String>,
     tran: Option<String>,
+    rota: LsblkFlag,
+    rm: LsblkFlag,
     ro: LsblkFlag,
 }
 
@@ -67,7 +71,11 @@ impl LsblkDisk {
         };
         DiskInventory {
             read_only: self.ro.is_set(),
+            rotational: self.rota.is_set(),
+            removable: self.rm.is_set(),
             model: known(self.model),
+            vendor: known(self.vendor),
+            serial: known(self.serial),
             transport: known(self.tran),
             target: DiskTarget {
                 path: self.path,
