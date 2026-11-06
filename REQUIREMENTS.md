@@ -113,8 +113,8 @@ actionable and explicit.
 
 ## 4. UI and UX Requirements
 
-The installer UI is `tui/apps/install/disk-plan`; its pages are its own
-(`src/domain/flow.ts`). recpart's part is the JSON contract it renders.
+`tui/apps/install/disk-plan` renders recpart's JSON as a page flow (`src/flow.ts`);
+it ships on no ISO yet. recpart's part is the JSON contract it renders.
 
 ---
 
