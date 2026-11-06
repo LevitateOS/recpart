@@ -143,6 +143,14 @@
         "physical_sector_bytes"
       ]
     },
+    "Filesystem": {
+      "description": "The filesystems recpart creates.",
+      "type": "string",
+      "enum": [
+        "vfat",
+        "ext4"
+      ]
+    },
     "HandoffPayload": {
       "type": "object",
       "properties": {
@@ -281,8 +289,12 @@
     "PartitionTemplate": {
       "type": "object",
       "properties": {
+        "bootable": {
+          "description": "The legacy-BIOS bootable flag (set on the ESP).",
+          "type": "boolean"
+        },
         "filesystem": {
-          "type": "string"
+          "$ref": "#/$defs/Filesystem"
         },
         "gpt_type": {
           "type": "string"
@@ -317,6 +329,7 @@
         "filesystem",
         "label",
         "gpt_type",
+        "bootable",
         "mountpoint"
       ]
     },

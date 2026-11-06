@@ -7,7 +7,7 @@ use crate::preflight::{
     ensure_required_tools, ensure_root_for_apply, kernel_partition_names,
 };
 use crate::types::{
-    ApplyOptions, ApplyResult, CommandRecord, MountMapping, PartitionPlan, PartitionTemplate,
+    ApplyOptions, ApplyResult, CommandRecord, Filesystem, MountMapping, PartitionPlan, PartitionTemplate,
     APPLY_SCHEMA_VERSION, CONFIRM_TOKEN,
 };
 use std::fs;
@@ -61,12 +61,14 @@ enum ExecutionAction {
 
 pub fn execute_plan(plan: &PartitionPlan, opts: &ApplyOptions) -> Result<ApplyResult> {
     ensure_mount_root_safe(&opts.mount_root)?;
+    let actions = build_apply_actions(plan, &opts.mount_root);
+    let programs = required_programs(&actions);
 
     // The disk checks only read; dry-run reports what apply would refuse
     // instead of stopping, so a preview says whether apply can run.
     let disk_checks: [&dyn Fn() -> Result<()>; 5] = [
         &|| ensure_root_for_apply(),
-        &|| ensure_required_tools(),
+        &|| ensure_required_tools(&programs),
         &|| ensure_disk_writable(&plan.disk.path),
         &|| ensure_disk_not_mounted(&plan.disk.path),
         &|| ensure_disk_not_in_use(&plan.disk.path),
@@ -81,7 +83,6 @@ pub fn execute_plan(plan: &PartitionPlan, opts: &ApplyOptions) -> Result<ApplyRe
         }
     }
 
-    let actions = build_apply_actions(plan, &opts.mount_root)?;
     let mounted: Vec<MountMapping> = actions
         .iter()
         .filter_map(|action| match action {
@@ -177,30 +178,21 @@ fn ensure_confirmation(token: Option<&str>) -> Result<()> {
 }
 
 /// The filesystem-creation command for a planned partition.
-fn format_command(part: &PartitionTemplate, device: String) -> Result<(String, Vec<String>)> {
-    let (program, args) = match part.filesystem.as_str() {
-        "vfat" => ("mkfs.vfat", vec!["-F", "32", "-n", part.label.as_str()]),
-        "ext4" => ("mkfs.ext4", vec!["-F", "-L", part.label.as_str()]),
-        other => {
-            return Err(RecpartError::new(
-                ErrorCode::Internal,
-                "exec",
-                "planned filesystems are vfat or ext4",
-                format!("partition {} uses '{other}'", part.name),
-                "Fix the partition policy.",
-            ))
-        }
+fn format_command(part: &PartitionTemplate, device: String) -> (String, Vec<String>) {
+    let (program, args) = match part.filesystem {
+        Filesystem::Vfat => ("mkfs.vfat", vec!["-F", "32", "-n", part.label.as_str()]),
+        Filesystem::Ext4 => ("mkfs.ext4", vec!["-F", "-L", part.label.as_str()]),
     };
     let mut args: Vec<String> = args.into_iter().map(str::to_string).collect();
     args.push(device);
-    Ok((program.to_string(), args))
+    (program.to_string(), args)
 }
 
 /// Every step of apply, derived from the plan's partition templates:
 /// partition the disk, format each partition as planned, then mount each
 /// partition that has a mount point at `<mount_root>/sysroot<mountpoint>`,
 /// parents first.
-fn build_apply_actions(plan: &PartitionPlan, mount_root: &Path) -> Result<Vec<ExecutionAction>> {
+fn build_apply_actions(plan: &PartitionPlan, mount_root: &Path) -> Vec<ExecutionAction> {
     let disk = plan.disk.path.to_string_lossy().to_string();
     let mut actions = vec![
         ExecutionAction::Run {
@@ -226,7 +218,7 @@ fn build_apply_actions(plan: &PartitionPlan, mount_root: &Path) -> Result<Vec<Ex
     ];
 
     for part in &plan.partitions {
-        let (program, args) = format_command(part, partition_device(&plan.disk.path, part.index))?;
+        let (program, args) = format_command(part, partition_device(&plan.disk.path, part.index));
         actions.push(ExecutionAction::Run {
             phase: Phase::Format,
             program,
@@ -254,11 +246,27 @@ fn build_apply_actions(plan: &PartitionPlan, mount_root: &Path) -> Result<Vec<Ex
         });
     }
 
-    Ok(actions)
+    actions
+}
+
+/// The programs `actions` run, plus `umount` for rolling mounts back.
+fn required_programs(actions: &[ExecutionAction]) -> Vec<String> {
+    let mut programs: Vec<String> = actions
+        .iter()
+        .filter_map(|action| match action {
+            ExecutionAction::Run { program, .. } => Some(program.clone()),
+            ExecutionAction::Mount { .. } => Some("mount".to_string()),
+            ExecutionAction::VerifyPartitions => None,
+        })
+        .chain(["umount".to_string()])
+        .collect();
+    programs.sort();
+    programs.dedup();
+    programs
 }
 
 /// Where the installed system's root is mounted during installation.
-pub fn install_root(mount_root: &Path) -> PathBuf {
+fn install_root(mount_root: &Path) -> PathBuf {
     mount_root.join("sysroot")
 }
 

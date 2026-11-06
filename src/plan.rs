@@ -50,7 +50,7 @@ pub fn build_sfdisk_script(partitions: &[PartitionTemplate]) -> String {
     lines.push("label: gpt".to_string());
 
     for part in partitions {
-        let line = match (part.size_mb, part.gpt_type == "U") {
+        let line = match (part.size_mb, part.bootable) {
             (Some(size_mb), true) => format!(",{size_mb}M,{},*", part.gpt_type),
             (Some(size_mb), false) => format!(",{size_mb}M,{}", part.gpt_type),
             (None, _) => format!(",,{}", part.gpt_type),

@@ -7,9 +7,6 @@ pub mod policy;
 pub mod preflight;
 pub mod types;
 
-pub use error::{ErrorCode, RecpartError, Result};
-pub use exec::execute_plan;
-pub use plan::build_plan;
 pub use types::{
     ApplyOptions, ApplyResult, DiskInventory, DiskListResult, DiskTarget, HandoffPayload,
     InstallMode, LayoutRequest, PartitionPlan, ResolvedLayout,

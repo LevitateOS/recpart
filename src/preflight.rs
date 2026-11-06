@@ -129,18 +129,6 @@ fn lsblk_disks(device: Option<&Path>) -> Result<Vec<LsblkDisk>> {
     Ok(parsed.blockdevices)
 }
 
-/// Programs apply runs.
-const REQUIRED_TOOLS: &[&str] = &[
-    "lsblk",
-    "sfdisk",
-    "wipefs",
-    "mkfs.vfat",
-    "mkfs.ext4",
-    "mount",
-    "umount",
-    "udevadm",
-];
-
 fn tool_in_path(tool: &str) -> bool {
     let Some(paths) = env::var_os("PATH") else {
         return false;
@@ -158,8 +146,9 @@ fn tool_in_path(tool: &str) -> bool {
     })
 }
 
-pub fn ensure_required_tools() -> Result<()> {
-    for tool in REQUIRED_TOOLS {
+/// Every program apply will run is on PATH.
+pub fn ensure_required_tools(programs: &[String]) -> Result<()> {
+    for tool in programs {
         if !tool_in_path(tool) {
             return Err(RecpartError::new(
                 ErrorCode::MissingTool,

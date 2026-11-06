@@ -64,18 +64,18 @@ fn ab_layout_is_planned_applied_and_handed_off() {
     let plan: PartitionPlan =
         serde_json::from_str(&recpart(&["plan", "--disk", &disk.device, "--mode", "ab", "--json"]))
             .unwrap();
-    let layout: Vec<(&str, &str, &str)> = plan
+    let layout: Vec<(&str, String, &str)> = plan
         .partitions
         .iter()
-        .map(|p| (p.label.as_str(), p.filesystem.as_str(), p.mountpoint.as_str()))
+        .map(|p| (p.label.as_str(), serde_json::to_value(p.filesystem).unwrap().as_str().unwrap().to_string(), p.mountpoint.as_str()))
         .collect();
     assert_eq!(
         layout,
         [
-            ("EFI", "vfat", "/boot"),
-            ("ROOT_A", "ext4", "/"),
-            ("ROOT_B", "ext4", "none"),
-            ("STATE", "ext4", "/state"),
+            ("EFI", "vfat".to_string(), "/boot"),
+            ("ROOT_A", "ext4".to_string(), "/"),
+            ("ROOT_B", "ext4".to_string(), "none"),
+            ("STATE", "ext4".to_string(), "/state"),
         ]
     );
 

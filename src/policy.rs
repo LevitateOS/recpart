@@ -1,5 +1,5 @@
 use crate::error::{ErrorCode, RecpartError, Result};
-use crate::types::{InstallMode, LayoutRequest, PartitionTemplate, ResolvedLayout};
+use crate::types::{Filesystem, InstallMode, LayoutRequest, PartitionTemplate, ResolvedLayout};
 
 /// Mount point of a partition that is not mounted during installation (the
 /// inactive A/B slot), as in fstab.
@@ -105,36 +105,40 @@ pub fn build_templates(layout: &ResolvedLayout) -> Vec<PartitionTemplate> {
             PartitionTemplate {
                 index: 1,
                 name: "efi".to_string(),
-                filesystem: "vfat".to_string(),
+                filesystem: Filesystem::Vfat,
                 label: "EFI".to_string(),
                 gpt_type: "U".to_string(),
+                bootable: true,
                 size_mb: Some(layout.efi_size_mb),
                 mountpoint: "/boot".to_string(),
             },
             PartitionTemplate {
                 index: 2,
                 name: "root_a".to_string(),
-                filesystem: "ext4".to_string(),
+                filesystem: Filesystem::Ext4,
                 label: "ROOT_A".to_string(),
                 gpt_type: "L".to_string(),
+                bootable: false,
                 size_mb: layout.root_a_size_mb,
                 mountpoint: "/".to_string(),
             },
             PartitionTemplate {
                 index: 3,
                 name: "root_b".to_string(),
-                filesystem: "ext4".to_string(),
+                filesystem: Filesystem::Ext4,
                 label: "ROOT_B".to_string(),
                 gpt_type: "L".to_string(),
+                bootable: false,
                 size_mb: layout.root_b_size_mb,
                 mountpoint: NOT_MOUNTED.to_string(),
             },
             PartitionTemplate {
                 index: 4,
                 name: "state".to_string(),
-                filesystem: "ext4".to_string(),
+                filesystem: Filesystem::Ext4,
                 label: "STATE".to_string(),
                 gpt_type: "L".to_string(),
+                bootable: false,
                 size_mb: layout.state_size_mb,
                 mountpoint: "/state".to_string(),
             },
@@ -143,18 +147,20 @@ pub fn build_templates(layout: &ResolvedLayout) -> Vec<PartitionTemplate> {
             PartitionTemplate {
                 index: 1,
                 name: "efi".to_string(),
-                filesystem: "vfat".to_string(),
+                filesystem: Filesystem::Vfat,
                 label: "EFI".to_string(),
                 gpt_type: "U".to_string(),
+                bootable: true,
                 size_mb: Some(layout.efi_size_mb),
                 mountpoint: "/boot".to_string(),
             },
             PartitionTemplate {
                 index: 2,
                 name: "root".to_string(),
-                filesystem: "ext4".to_string(),
+                filesystem: Filesystem::Ext4,
                 label: "ROOT".to_string(),
                 gpt_type: "L".to_string(),
+                bootable: false,
                 size_mb: layout.root_size_mb,
                 mountpoint: "/".to_string(),
             },

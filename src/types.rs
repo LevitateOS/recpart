@@ -60,14 +60,25 @@ pub struct DiskListResult {
     pub disks: Vec<DiskInventory>,
 }
 
+/// The filesystems recpart creates.
+#[cfg_attr(feature = "contracts", derive(schemars::JsonSchema, ts_rs::TS))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Filesystem {
+    Vfat,
+    Ext4,
+}
+
 #[cfg_attr(feature = "contracts", derive(schemars::JsonSchema, ts_rs::TS))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PartitionTemplate {
     pub index: u8,
     pub name: String,
-    pub filesystem: String,
+    pub filesystem: Filesystem,
     pub label: String,
     pub gpt_type: String,
+    /// The legacy-BIOS bootable flag (set on the ESP).
+    pub bootable: bool,
     pub size_mb: Option<u32>,
     pub mountpoint: String,
 }
