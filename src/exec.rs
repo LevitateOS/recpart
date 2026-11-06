@@ -92,7 +92,7 @@ pub fn execute_plan(plan: &PartitionPlan, opts: &ApplyOptions) -> Result<ApplyRe
             _ => None,
         })
         .collect();
-    let handoff = build_handoff(plan, mounted.clone());
+    let handoff = build_handoff(plan, mounted);
 
     let steps = if opts.dry_run {
         actions.iter().map(|action| action.record(true)).collect()
@@ -122,7 +122,6 @@ pub fn execute_plan(plan: &PartitionPlan, opts: &ApplyOptions) -> Result<ApplyRe
         steps,
         partition_map: plan.partitions.clone(),
         formatted_devices: formatted_devices(plan),
-        mounted,
         handoff,
         warnings,
     })

@@ -151,9 +151,9 @@ fn run_apply(args: ApplyArgs, json: bool) -> Result<()> {
             }
         }
 
-        println!("\nHandoff commands:");
-        for cmd in &result.handoff.next_commands {
-            println!("  {}", cmd);
+        println!("\nInstall target: {}", result.handoff.install_target);
+        for mount in &result.handoff.mount_map {
+            println!("  {} <- {}", mount.path, mount.device);
         }
     }
 

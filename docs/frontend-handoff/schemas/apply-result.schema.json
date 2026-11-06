@@ -24,12 +24,6 @@
     "mode": {
       "$ref": "#/$defs/InstallMode"
     },
-    "mounted": {
-      "type": "array",
-      "items": {
-        "$ref": "#/$defs/MountMapping"
-      }
-    },
     "partition_map": {
       "type": "array",
       "items": {
@@ -67,7 +61,6 @@
     "steps",
     "partition_map",
     "formatted_devices",
-    "mounted",
     "handoff",
     "warnings"
   ],
@@ -168,12 +161,6 @@
             "$ref": "#/$defs/MountMapping"
           }
         },
-        "next_commands": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          }
-        },
         "schema_version": {
           "type": "integer",
           "format": "uint32",
@@ -185,7 +172,6 @@
         "mode",
         "install_target",
         "mount_map",
-        "next_commands",
         "mode_context"
       ]
     },
@@ -248,6 +234,7 @@
       }
     },
     "ModeContext": {
+      "description": "A/B facts of the layout (all `None` in mutable mode): which slot the\ninstall target is (\"A\"/\"B\"), the other slot, and each slot's partition.",
       "type": "object",
       "properties": {
         "inactive_slot_hint": {
@@ -262,12 +249,6 @@
             "null"
           ]
         },
-        "notes": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          }
-        },
         "slot_a_device": {
           "type": [
             "string",
@@ -280,10 +261,7 @@
             "null"
           ]
         }
-      },
-      "required": [
-        "notes"
-      ]
+      }
     },
     "MountMapping": {
       "type": "object",

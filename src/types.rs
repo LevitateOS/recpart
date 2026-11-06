@@ -3,8 +3,8 @@ use std::fmt;
 use std::path::PathBuf;
 
 pub const PLAN_SCHEMA_VERSION: u32 = 1;
-pub const APPLY_SCHEMA_VERSION: u32 = 1;
-pub const HANDOFF_SCHEMA_VERSION: u32 = 1;
+pub const APPLY_SCHEMA_VERSION: u32 = 2;
+pub const HANDOFF_SCHEMA_VERSION: u32 = 2;
 pub const ERROR_SCHEMA_VERSION: u32 = 1;
 pub const DISK_LIST_SCHEMA_VERSION: u32 = 1;
 
@@ -133,12 +133,13 @@ pub struct MountMapping {
 
 #[cfg_attr(feature = "contracts", derive(schemars::JsonSchema, ts_rs::TS))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// A/B facts of the layout (all `None` in mutable mode): which slot the
+/// install target is ("A"/"B"), the other slot, and each slot's partition.
 pub struct ModeContext {
     pub install_target_slot: Option<String>,
     pub inactive_slot_hint: Option<String>,
     pub slot_a_device: Option<String>,
     pub slot_b_device: Option<String>,
-    pub notes: Vec<String>,
 }
 
 #[cfg_attr(feature = "contracts", derive(schemars::JsonSchema, ts_rs::TS))]
@@ -148,7 +149,6 @@ pub struct HandoffPayload {
     pub mode: InstallMode,
     pub install_target: String,
     pub mount_map: Vec<MountMapping>,
-    pub next_commands: Vec<String>,
     pub mode_context: ModeContext,
 }
 
@@ -177,7 +177,6 @@ pub struct ApplyResult {
     pub steps: Vec<CommandRecord>,
     pub partition_map: Vec<PartitionTemplate>,
     pub formatted_devices: Vec<String>,
-    pub mounted: Vec<MountMapping>,
     pub handoff: HandoffPayload,
     pub warnings: Vec<String>,
 }
