@@ -53,7 +53,7 @@ This specification does not cover:
 - fstab generation (`recfstab`)
 - chroot setup (`recchroot`)
 - slot state machine (`recab`)
-- immutability/integrity enforcement policy (`recguard`)
+- immutability/integrity enforcement policy
 
 ### 1.3 Responsibility Boundary
 
@@ -249,8 +249,7 @@ explicit final confirmation in interactive mode.
 ### 10.2 Scope-Limited Trust
 
 **REQ-SEC-010**: `recpart` MUST treat immutability enforcement as out of scope
-and MUST delegate that responsibility to dedicated policy tools (for example,
-`recguard`).
+and MUST delegate that responsibility to dedicated policy tools.
 
 ---
 
