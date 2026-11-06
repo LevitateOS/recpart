@@ -260,6 +260,6 @@ Unit tests are prohibited. Choose focused validation for the behavior being chan
 
 - `cargo check -p recpart` for compilation.
 - `cargo test -p recpart --test integration_cli` for the actual CLI and JSON contract.
-- `tests/e2e_real_disk.rs` for explicit checks on a designated throwaway disk; destructive runs retain their acknowledgement requirements.
+- `tests/loop_disk.rs` (root) for plan, dry-run and apply on a loop device.
 
 Use `docs/use-cases.md` for example workflows. No traceability matrix or minimum coverage gate is required during development.
