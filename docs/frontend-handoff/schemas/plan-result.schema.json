@@ -78,10 +78,17 @@
       ]
     },
     "InstallMode": {
-      "type": "string",
-      "enum": [
-        "ab",
-        "mutable"
+      "oneOf": [
+        {
+          "description": "A/B immutable-ready layout: two root slots for atomic updates and rollback.",
+          "type": "string",
+          "const": "ab"
+        },
+        {
+          "description": "Classic layout with one mutable root.",
+          "type": "string",
+          "const": "mutable"
+        }
       ]
     },
     "LayoutRequest": {

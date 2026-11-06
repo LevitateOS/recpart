@@ -15,8 +15,10 @@ pub const CONFIRM_TOKEN: &str = "DESTROY";
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, clap::ValueEnum)]
 #[serde(rename_all = "snake_case")]
 pub enum InstallMode {
+    /// A/B immutable-ready layout: two root slots for atomic updates and rollback.
     #[default]
     Ab,
+    /// Classic layout with one mutable root.
     Mutable,
 }
 
@@ -189,6 +191,7 @@ pub struct ApplyResult {
     pub partition_map: Vec<PartitionTemplate>,
     pub formatted_devices: Vec<String>,
     pub handoff: HandoffPayload,
+    /// In a dry run, the reasons a real apply would refuse this disk; empty when it would proceed.
     pub warnings: Vec<String>,
 }
 
