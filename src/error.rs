@@ -1,9 +1,11 @@
 use crate::types::{ErrorPayload, ERROR_SCHEMA_VERSION};
-use distro_spec::impl_error_code_display;
-use distro_spec::shared::error::ToolErrorCode;
 use std::fmt;
 
+/// recpart's error table. Each variant's number is its stable code: it prints
+/// as `E0NN`, is the JSON `code`, and is the exit status. Numbers are assigned
+/// explicitly and never reused (8 and 10 belonged to removed variants).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
 pub enum ErrorCode {
     InvalidTargetDisk = 1,
     MissingTool = 2,
@@ -12,37 +14,23 @@ pub enum ErrorCode {
     PartitionApplyFailed = 5,
     FormatFailed = 6,
     MountFailed = 7,
-    HandoffFailed = 8,
     JsonSerialize = 9,
-    NotImplemented = 10,
     NotRoot = 11,
     Internal = 12,
+    InvalidMountRoot = 13,
 }
 
-impl ToolErrorCode for ErrorCode {
-    fn code(&self) -> &'static str {
-        match self {
-            ErrorCode::InvalidTargetDisk => "E001",
-            ErrorCode::MissingTool => "E002",
-            ErrorCode::PlanGeneration => "E003",
-            ErrorCode::MissingConfirmation => "E004",
-            ErrorCode::PartitionApplyFailed => "E005",
-            ErrorCode::FormatFailed => "E006",
-            ErrorCode::MountFailed => "E007",
-            ErrorCode::HandoffFailed => "E008",
-            ErrorCode::JsonSerialize => "E009",
-            ErrorCode::NotImplemented => "E010",
-            ErrorCode::NotRoot => "E011",
-            ErrorCode::Internal => "E012",
-        }
-    }
-
-    fn exit_code(&self) -> u8 {
-        *self as u8
+impl ErrorCode {
+    pub fn exit_status(self) -> u8 {
+        self as u8
     }
 }
 
-impl_error_code_display!(ErrorCode);
+impl fmt::Display for ErrorCode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "E{:03}", *self as u8)
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct RecpartError {
@@ -73,7 +61,7 @@ impl RecpartError {
     pub fn payload(&self) -> ErrorPayload {
         ErrorPayload {
             schema_version: ERROR_SCHEMA_VERSION,
-            code: self.code.code().to_string(),
+            code: self.code.to_string(),
             component: self.component.clone(),
             expectation: self.expectation.clone(),
             observed: self.observed.clone(),
@@ -87,7 +75,7 @@ impl fmt::Display for RecpartError {
         write!(
             f,
             "{}: [{}] expected {}, observed {}. remediation: {}",
-            self.code.code(),
+            self.code,
             self.component,
             self.expectation,
             self.observed,

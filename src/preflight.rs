@@ -134,7 +134,7 @@ pub fn ensure_block_device(path: &Path) -> Result<()> {
 pub fn ensure_mount_root_safe(path: &Path) -> Result<()> {
     if !path.is_absolute() {
         return Err(RecpartError::new(
-            ErrorCode::MountFailed,
+            ErrorCode::InvalidMountRoot,
             "preflight",
             "mount root path is absolute",
             format!("'{}' is not absolute", path.display()),
@@ -144,7 +144,7 @@ pub fn ensure_mount_root_safe(path: &Path) -> Result<()> {
 
     if is_protected_path(path) {
         return Err(RecpartError::new(
-            ErrorCode::MountFailed,
+            ErrorCode::InvalidMountRoot,
             "preflight",
             "mount root is not a protected system path",
             format!("'{}' is protected", path.display()),

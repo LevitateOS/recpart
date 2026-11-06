@@ -1,5 +1,4 @@
 use clap::Parser;
-use distro_spec::shared::error::ToolErrorCode;
 use recpart::cli::{run, Cli};
 use recpart::json::to_pretty_json;
 use std::process::ExitCode;
@@ -19,7 +18,7 @@ fn main() -> ExitCode {
             } else {
                 eprintln!("recpart: {}", err);
             }
-            ExitCode::from(err.code.exit_code())
+            ExitCode::from(err.code.exit_status())
         }
     }
 }
