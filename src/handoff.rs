@@ -1,15 +1,18 @@
 use crate::plan::partition_device;
-use crate::policy::DEFAULT_AB_TARGET_SLOT;
 use crate::types::{
     HandoffPayload, InstallMode, ModeContext, MountMapping, PartitionPlan, HANDOFF_SCHEMA_VERSION,
 };
 
 pub fn build_handoff(plan: &PartitionPlan, mounted: Vec<MountMapping>) -> HandoffPayload {
-    let install_target = mounted
-        .iter()
-        .find(|m| m.path.ends_with("/sysroot"))
+    // The install target is where the partition planned for "/" is mounted.
+    let root = plan.partitions.iter().find(|p| p.mountpoint == "/");
+    let install_target = root
+        .and_then(|p| {
+            let device = partition_device(&plan.disk.path, p.index);
+            mounted.iter().find(|m| m.device == device)
+        })
         .map(|m| m.path.clone())
-        .unwrap_or_else(|| "/mnt/sysroot".to_string());
+        .unwrap_or_default();
 
     let mut next_commands = vec![
         format!("recstrap {install_target}"),
@@ -19,27 +22,26 @@ pub fn build_handoff(plan: &PartitionPlan, mounted: Vec<MountMapping>) -> Handof
 
     let mode_context = match plan.mode {
         InstallMode::Ab => {
-            let slot_a_device = Some(partition_device(&plan.disk.path, 2));
-            let slot_b_device = Some(partition_device(&plan.disk.path, 3));
-            let install_target_slot = DEFAULT_AB_TARGET_SLOT.to_string();
-            let inactive_slot_hint = if install_target_slot == "A" {
-                "B".to_string()
+            let slot = |name: &str| plan.partitions.iter().find(|p| p.name == name);
+            let device_of = |name: &str| slot(name).map(|p| partition_device(&plan.disk.path, p.index));
+            // The slot installed now is the one mounted at "/"; the other is
+            // left unmounted for later updates.
+            let target_slot = |name: &str| slot(name).is_some_and(|p| p.mountpoint == "/");
+            let (install_target_slot, inactive_slot_hint) = if target_slot("root_a") {
+                ("A", "B")
             } else {
-                "A".to_string()
+                ("B", "A")
             };
             next_commands.push("recab status".to_string());
-            next_commands.push(
-                "# after validation, choose slot policy with recab set-next <A|B>".to_string(),
-            );
 
             ModeContext {
-                install_target_slot: Some(install_target_slot),
-                inactive_slot_hint: Some(inactive_slot_hint),
-                slot_a_device,
-                slot_b_device,
+                install_target_slot: Some(install_target_slot.to_string()),
+                inactive_slot_hint: Some(inactive_slot_hint.to_string()),
+                slot_a_device: device_of("root_a"),
+                slot_b_device: device_of("root_b"),
                 notes: vec![
-                    "A/B mode defaults install target to slot A for first install run.".to_string(),
-                    "Use recab to manage active/inactive slot transitions after installation."
+                    format!("A/B mode installs to slot {install_target_slot}."),
+                    "After validation, choose the next boot slot with recab set-next <A|B>."
                         .to_string(),
                 ],
             }

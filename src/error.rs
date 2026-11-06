@@ -3,7 +3,7 @@ use std::fmt;
 
 /// recpart's error table. Each variant's number is its stable code: it prints
 /// as `E0NN`, is the JSON `code`, and is the exit status. Numbers are assigned
-/// explicitly and never reused (8 and 10 belonged to removed variants).
+/// explicitly and never reused (8, 9 and 10 belonged to removed variants).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum ErrorCode {
@@ -14,7 +14,6 @@ pub enum ErrorCode {
     PartitionApplyFailed = 5,
     FormatFailed = 6,
     MountFailed = 7,
-    JsonSerialize = 9,
     NotRoot = 11,
     Internal = 12,
     InvalidMountRoot = 13,

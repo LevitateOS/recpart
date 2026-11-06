@@ -9,58 +9,131 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+/// Where the kernel lists block devices and their partitions and holders.
+const SYS_BLOCK: &str = "/sys/class/block";
+
+/// The columns recpart reads for a disk, in one `lsblk -J` query.
+const DISK_COLUMNS: &str = "PATH,TYPE,SIZE,LOG-SEC,PHY-SEC,MODEL,TRAN,RO";
+
 #[derive(Debug, Deserialize)]
-struct LsblkListJson {
+struct LsblkJson {
     #[serde(default)]
-    blockdevices: Vec<LsblkDiskRow>,
+    blockdevices: Vec<LsblkDisk>,
 }
 
 #[derive(Debug, Deserialize)]
-struct LsblkDiskRow {
-    path: Option<String>,
+struct LsblkDisk {
+    path: PathBuf,
     #[serde(rename = "type")]
-    dev_type: Option<String>,
-    #[serde(default)]
+    dev_type: String,
+    size: u64,
+    #[serde(rename = "log-sec")]
+    log_sec: u32,
+    #[serde(rename = "phy-sec")]
+    phy_sec: u32,
     model: Option<String>,
-    #[serde(default)]
     tran: Option<String>,
-    #[serde(default)]
-    ro: Option<LsblkReadOnly>,
+    ro: LsblkFlag,
 }
 
+/// lsblk prints flags as JSON booleans (util-linux >= 2.37) or as "0"/"1".
 #[derive(Debug, Deserialize)]
 #[serde(untagged)]
-enum LsblkReadOnly {
+enum LsblkFlag {
     Bool(bool),
-    Num(u8),
     Text(String),
 }
 
-impl LsblkReadOnly {
-    fn is_read_only(&self) -> bool {
+impl LsblkFlag {
+    fn is_set(&self) -> bool {
         match self {
-            LsblkReadOnly::Bool(value) => *value,
-            LsblkReadOnly::Num(value) => *value != 0,
-            LsblkReadOnly::Text(value) => {
-                let normalized = value.trim().to_ascii_lowercase();
-                normalized == "1" || normalized == "true" || normalized == "yes"
-            }
+            LsblkFlag::Bool(value) => *value,
+            LsblkFlag::Text(value) => value.trim() == "1",
         }
     }
 }
 
-pub const REQUIRED_TOOLS: &[&str] = &[
+impl LsblkDisk {
+    fn is_whole_disk(&self) -> bool {
+        matches!(self.dev_type.as_str(), "disk" | "loop")
+    }
+
+    fn into_inventory(self) -> DiskInventory {
+        let known = |value: Option<String>| {
+            value
+                .map(|v| v.trim().to_string())
+                .filter(|v| !v.is_empty())
+                .unwrap_or_else(|| "unknown".to_string())
+        };
+        DiskInventory {
+            read_only: self.ro.is_set(),
+            model: known(self.model),
+            transport: known(self.tran),
+            target: DiskTarget {
+                path: self.path,
+                size_bytes: self.size,
+                logical_sector_bytes: self.log_sec,
+                physical_sector_bytes: self.phy_sec,
+            },
+        }
+    }
+}
+
+/// Run lsblk and return its stdout; `what` names the query in errors.
+fn lsblk(args: &[&str], what: &str) -> Result<String> {
+    let fail = |observed: String| {
+        RecpartError::new(
+            ErrorCode::InvalidTargetDisk,
+            "preflight",
+            format!("lsblk can {what}"),
+            observed,
+            "Check that the device exists and util-linux's lsblk is installed.",
+        )
+    };
+    let output = Command::new("lsblk")
+        .args(args)
+        .output()
+        .map_err(|err| fail(format!("failed to execute lsblk: {err}")))?;
+    if !output.status.success() {
+        return Err(fail(String::from_utf8_lossy(&output.stderr).trim().to_string()));
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
+/// The disks lsblk reports, without their partitions; `device` narrows the
+/// query to one device.
+fn lsblk_disks(device: Option<&Path>) -> Result<Vec<LsblkDisk>> {
+    let mut args = vec!["-J", "-b", "-d", "-o", DISK_COLUMNS];
+    let device = device.map(|d| d.to_string_lossy().into_owned());
+    if let Some(device) = &device {
+        args.push(device);
+    }
+    let stdout = lsblk(&args, "describe block devices")?;
+    let parsed: LsblkJson = serde_json::from_str(&stdout).map_err(|err| {
+        RecpartError::new(
+            ErrorCode::InvalidTargetDisk,
+            "preflight",
+            "lsblk JSON output is parseable",
+            format!("failed to parse lsblk JSON: {err}"),
+            format!("Inspect 'lsblk -J -b -d -o {DISK_COLUMNS}' output."),
+        )
+    })?;
+    Ok(parsed.blockdevices)
+}
+
+/// Programs apply runs.
+const REQUIRED_TOOLS: &[&str] = &[
     "lsblk",
     "sfdisk",
     "wipefs",
     "mkfs.vfat",
     "mkfs.ext4",
     "mount",
+    "umount",
     "udevadm",
-    "blkid",
 ];
 
-pub fn tool_in_path(tool: &str) -> bool {
+fn tool_in_path(tool: &str) -> bool {
     let Some(paths) = env::var_os("PATH") else {
         return false;
     };
@@ -107,7 +180,7 @@ pub fn ensure_root_for_apply() -> Result<()> {
     ))
 }
 
-pub fn ensure_block_device(path: &Path) -> Result<()> {
+fn ensure_block_device(path: &Path) -> Result<()> {
     let metadata = fs::metadata(path).map_err(|err| {
         RecpartError::new(
             ErrorCode::InvalidTargetDisk,
@@ -167,71 +240,11 @@ fn resolve_disk_path(path: &Path) -> Result<PathBuf> {
     })
 }
 
-fn ensure_whole_disk(path: &Path) -> Result<()> {
-    let output = Command::new("lsblk")
-        .args(["-dn", "-o", "TYPE", &path.to_string_lossy()])
-        .output()
-        .map_err(|err| {
-            RecpartError::new(
-                ErrorCode::InvalidTargetDisk,
-                "preflight",
-                "lsblk can query target type",
-                format!("failed to execute lsblk: {err}"),
-                "Ensure util-linux is installed and lsblk is available.",
-            )
-        })?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(RecpartError::new(
-            ErrorCode::InvalidTargetDisk,
-            "preflight",
-            "target type query succeeds",
-            stderr.trim().to_string(),
-            "Verify target disk path exists and is accessible.",
-        ));
-    }
-
-    let device_type = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    if matches!(device_type.as_str(), "disk" | "loop") {
-        return Ok(());
-    }
-
-    Err(RecpartError::new(
-        ErrorCode::InvalidTargetDisk,
-        "preflight",
-        "target path resolves to whole-disk device type",
-        format!("device type is '{}'", device_type),
-        "Target a disk device (for example /dev/sda), not a partition like /dev/sda1.",
-    ))
-}
-
 pub fn ensure_disk_not_mounted(path: &Path) -> Result<()> {
-    let output = Command::new("lsblk")
-        .args(["-nr", "-o", "MOUNTPOINT", &path.to_string_lossy()])
-        .output()
-        .map_err(|err| {
-            RecpartError::new(
-                ErrorCode::InvalidTargetDisk,
-                "preflight",
-                "lsblk can inspect mounted descendants",
-                format!("failed to execute lsblk: {err}"),
-                "Ensure util-linux is installed and lsblk is available.",
-            )
-        })?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(RecpartError::new(
-            ErrorCode::InvalidTargetDisk,
-            "preflight",
-            "mounted-state query succeeds",
-            stderr.trim().to_string(),
-            "Verify target disk path exists and is accessible.",
-        ));
-    }
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stdout = lsblk(
+        &["-nr", "-o", "MOUNTPOINT", &path.to_string_lossy()],
+        "list mounts on the disk and its partitions",
+    )?;
     let mounted_points = stdout
         .lines()
         .map(str::trim)
@@ -263,19 +276,19 @@ pub fn ensure_disk_not_in_use(path: &Path) -> Result<()> {
         .file_name()
         .map(|name| name.to_string_lossy().to_string())
         .unwrap_or_default();
-    let sys_dir = Path::new("/sys/class/block").join(&disk_name);
+    let sys_dir = Path::new(SYS_BLOCK).join(&disk_name);
 
     let mut problems = Vec::new();
-    let mut device_names = vec![disk_name.clone()];
-    device_names.extend(partition_names(&sys_dir));
+    let mut devices = vec![(disk_name, sys_dir.clone())];
+    devices.extend(
+        partition_names(&sys_dir)
+            .into_iter()
+            .map(|name| (name.clone(), sys_dir.join(name))),
+    );
+    let device_names: Vec<&String> = devices.iter().map(|(name, _)| name).collect();
 
-    for name in &device_names {
-        let holders_dir = if *name == disk_name {
-            sys_dir.join("holders")
-        } else {
-            sys_dir.join(name).join("holders")
-        };
-        if let Ok(entries) = fs::read_dir(&holders_dir) {
+    for (name, dir) in &devices {
+        if let Ok(entries) = fs::read_dir(dir.join("holders")) {
             for entry in entries.flatten() {
                 problems.push(format!(
                     "/dev/{name} is held by {}",
@@ -295,7 +308,7 @@ pub fn ensure_disk_not_in_use(path: &Path) -> Result<()> {
                 .file_name()
                 .map(|name| name.to_string_lossy().to_string())
                 .unwrap_or_default();
-            if device_names.contains(&swap_name) {
+            if device_names.contains(&&swap_name) {
                 problems.push(format!("{} is active swap", swap_path.display()));
             }
         }
@@ -340,7 +353,7 @@ pub fn kernel_partition_names(disk: &Path) -> Vec<String> {
         .file_name()
         .map(|name| name.to_string_lossy().to_string())
         .unwrap_or_default();
-    let mut names = partition_names(&Path::new("/sys/class/block").join(name));
+    let mut names = partition_names(&Path::new(SYS_BLOCK).join(name));
     names.sort();
     names
 }
@@ -355,262 +368,66 @@ fn open_exclusive(path: &Path) -> std::io::Result<()> {
 }
 
 pub fn ensure_disk_writable(path: &Path) -> Result<()> {
-    let output = Command::new("lsblk")
-        .args(["-dn", "-o", "RO", &path.to_string_lossy()])
-        .output()
-        .map_err(|err| {
-            RecpartError::new(
-                ErrorCode::InvalidTargetDisk,
-                "preflight",
-                "lsblk can query read-only status",
-                format!("failed to execute lsblk: {err}"),
-                "Ensure util-linux is installed and lsblk is available.",
-            )
-        })?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(RecpartError::new(
-            ErrorCode::InvalidTargetDisk,
-            "preflight",
-            "disk read-only status query succeeds",
-            stderr.trim().to_string(),
-            "Verify target disk path exists and is accessible.",
-        ));
-    }
-
-    let ro = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    if ro == "0" {
+    let read_only = query_disk(path)?.read_only;
+    if !read_only {
         return Ok(());
     }
 
     Err(RecpartError::new(
         ErrorCode::InvalidTargetDisk,
         "preflight",
-        "target disk is writable (RO=0)",
-        format!("read-only flag is RO={ro}"),
+        "target disk is writable",
+        format!("{} is read-only", path.display()),
         "Use a writable block device target and retry.",
     ))
 }
 
-pub fn query_disk_target(path: &Path) -> Result<DiskTarget> {
+/// Describe the whole disk at `path` (a partition is refused).
+fn query_disk(path: &Path) -> Result<DiskInventory> {
     let canonical = resolve_disk_path(path)?;
     ensure_block_device(&canonical)?;
-    ensure_whole_disk(&canonical)?;
-
-    let output = Command::new("lsblk")
-        .args([
-            "-b",
-            "-dn",
-            "-o",
-            "SIZE,LOG-SEC,PHY-SEC",
-            &canonical.to_string_lossy(),
-        ])
-        .output()
-        .map_err(|err| {
-            RecpartError::new(
-                ErrorCode::InvalidTargetDisk,
-                "preflight",
-                "lsblk can query disk geometry",
-                format!("failed to execute lsblk: {err}"),
-                "Ensure util-linux is installed and lsblk is available.",
-            )
-        })?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(RecpartError::new(
-            ErrorCode::InvalidTargetDisk,
-            "preflight",
-            "lsblk returns disk geometry",
-            stderr.trim().to_string(),
-            "Verify the disk path is valid and accessible.",
-        ));
-    }
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let mut parts = stdout.split_whitespace();
-
-    let size_bytes = parts
-        .next()
-        .ok_or_else(|| {
-            RecpartError::new(
-                ErrorCode::InvalidTargetDisk,
-                "preflight",
-                "lsblk output contains SIZE",
-                stdout.trim().to_string(),
-                "Inspect 'lsblk -b -dn -o SIZE,LOG-SEC,PHY-SEC <disk>' output.",
-            )
-        })?
-        .parse::<u64>()
-        .map_err(|err| {
-            RecpartError::new(
-                ErrorCode::InvalidTargetDisk,
-                "preflight",
-                "SIZE is parseable as integer",
-                format!("invalid SIZE value: {err}"),
-                "Check lsblk output and locale settings.",
-            )
-        })?;
-
-    let logical_sector_bytes = parts
-        .next()
-        .ok_or_else(|| {
-            RecpartError::new(
-                ErrorCode::InvalidTargetDisk,
-                "preflight",
-                "lsblk output contains LOG-SEC",
-                stdout.trim().to_string(),
-                "Inspect 'lsblk -b -dn -o SIZE,LOG-SEC,PHY-SEC <disk>' output.",
-            )
-        })?
-        .parse::<u32>()
-        .map_err(|err| {
-            RecpartError::new(
-                ErrorCode::InvalidTargetDisk,
-                "preflight",
-                "LOG-SEC is parseable as integer",
-                format!("invalid LOG-SEC value: {err}"),
-                "Check lsblk output and locale settings.",
-            )
-        })?;
-
-    let physical_sector_bytes = parts
-        .next()
-        .ok_or_else(|| {
-            RecpartError::new(
-                ErrorCode::InvalidTargetDisk,
-                "preflight",
-                "lsblk output contains PHY-SEC",
-                stdout.trim().to_string(),
-                "Inspect 'lsblk -b -dn -o SIZE,LOG-SEC,PHY-SEC <disk>' output.",
-            )
-        })?
-        .parse::<u32>()
-        .map_err(|err| {
-            RecpartError::new(
-                ErrorCode::InvalidTargetDisk,
-                "preflight",
-                "PHY-SEC is parseable as integer",
-                format!("invalid PHY-SEC value: {err}"),
-                "Check lsblk output and locale settings.",
-            )
-        })?;
-
-    Ok(DiskTarget {
-        path: canonical,
-        size_bytes,
-        logical_sector_bytes,
-        physical_sector_bytes,
-    })
-}
-
-pub fn list_candidate_disks() -> Result<Vec<DiskTarget>> {
-    Ok(list_disk_inventory()?
-        .disks
+    let disk = lsblk_disks(Some(&canonical))?
         .into_iter()
-        .map(|disk| DiskTarget {
-            path: disk.path,
-            size_bytes: disk.size_bytes,
-            logical_sector_bytes: disk.logical_sector_bytes,
-            physical_sector_bytes: disk.physical_sector_bytes,
-        })
-        .collect())
-}
-
-pub fn list_disk_inventory() -> Result<DiskListResult> {
-    let output = Command::new("lsblk")
-        .args([
-            "-J",
-            "-b",
-            "-d",
-            "-o",
-            "PATH,TYPE,SIZE,LOG-SEC,PHY-SEC,MODEL,TRAN,RO",
-        ])
-        .output()
-        .map_err(|err| {
+        .next()
+        .ok_or_else(|| {
             RecpartError::new(
                 ErrorCode::InvalidTargetDisk,
                 "preflight",
-                "lsblk can enumerate block devices",
-                format!("failed to execute lsblk: {err}"),
-                "Ensure util-linux is installed and lsblk is available.",
+                "lsblk describes the target disk",
+                format!("lsblk printed nothing for {}", canonical.display()),
+                "Verify the disk path is valid and accessible.",
             )
         })?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
+    if !disk.is_whole_disk() {
         return Err(RecpartError::new(
             ErrorCode::InvalidTargetDisk,
             "preflight",
-            "block device enumeration succeeds",
-            stderr.trim().to_string(),
-            "Verify the environment has a working lsblk.",
+            "target path resolves to whole-disk device type",
+            format!("device type is '{}'", disk.dev_type),
+            "Target a disk device (for example /dev/sda), not a partition like /dev/sda1.",
         ));
     }
+    Ok(disk.into_inventory())
+}
 
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let parsed: LsblkListJson = serde_json::from_str(&stdout).map_err(|err| {
-        RecpartError::new(
-            ErrorCode::InvalidTargetDisk,
-            "preflight",
-            "lsblk JSON output is parseable",
-            format!("failed to parse lsblk JSON: {err}"),
-            "Inspect 'lsblk -J -b -d -o PATH,TYPE,SIZE,LOG-SEC,PHY-SEC,MODEL,TRAN,RO' output.",
-        )
-    })?;
+pub fn query_disk_target(path: &Path) -> Result<DiskTarget> {
+    Ok(query_disk(path)?.target)
+}
 
-    let mut disks = Vec::new();
-    for row in parsed.blockdevices {
-        let Some(path) = row.path.as_deref() else {
-            continue;
-        };
-        let Some(dev_type) = row.dev_type.as_deref() else {
-            continue;
-        };
-        if !matches!(dev_type, "disk" | "loop") {
-            continue;
-        }
-
-        if Path::new(path)
-            .file_name()
-            .is_some_and(|name| name.to_string_lossy().starts_with("zram"))
-        {
-            continue;
-        }
-
-        let target = match query_disk_target(Path::new(path)) {
-            Ok(target) => target,
-            Err(err) => {
-                eprintln!("recpart: warning: skipping {path}: {err}");
-                continue;
-            }
-        };
-        disks.push(DiskInventory {
-            path: target.path,
-            size_bytes: target.size_bytes,
-            logical_sector_bytes: target.logical_sector_bytes,
-            physical_sector_bytes: target.physical_sector_bytes,
-            model: row
-                .model
-                .as_deref()
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-                .unwrap_or("unknown")
-                .to_string(),
-            transport: row
-                .tran
-                .as_deref()
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-                .unwrap_or("unknown")
-                .to_string(),
-            read_only: row.ro.as_ref().is_some_and(LsblkReadOnly::is_read_only),
-        });
-    }
-
-    disks.sort_by(|a, b| a.path.cmp(&b.path));
-    disks.dedup_by(|a, b| a.path == b.path);
+/// Whole disks that can be installed to (zram swap devices are left out).
+pub fn list_disk_inventory() -> Result<DiskListResult> {
+    let mut disks: Vec<DiskInventory> = lsblk_disks(None)?
+        .into_iter()
+        .filter(LsblkDisk::is_whole_disk)
+        .filter(|disk| {
+            !disk
+                .path
+                .file_name()
+                .is_some_and(|name| name.to_string_lossy().starts_with("zram"))
+        })
+        .map(LsblkDisk::into_inventory)
+        .collect();
+    disks.sort_by(|a, b| a.target.path.cmp(&b.target.path));
     Ok(DiskListResult {
         schema_version: DISK_LIST_SCHEMA_VERSION,
         disks,

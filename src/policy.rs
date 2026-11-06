@@ -1,7 +1,9 @@
 use crate::error::{ErrorCode, RecpartError, Result};
 use crate::types::{InstallMode, LayoutRequest, PartitionTemplate, ResolvedLayout};
 
-pub const DEFAULT_AB_TARGET_SLOT: &str = "A";
+/// Mount point of a partition that is not mounted during installation (the
+/// inactive A/B slot), as in fstab.
+pub const NOT_MOUNTED: &str = "none";
 pub const DEFAULT_EFI_SIZE_MB: u32 = 1024;
 pub const DEFAULT_AB_ROOT_SIZE_MB: u32 = 20 * 1024;
 pub const DEFAULT_AB_MIN_STATE_MB: u32 = 4 * 1024;
@@ -88,18 +90,12 @@ pub fn resolve_layout_request(
     Ok(resolved)
 }
 
-pub fn required_min_mb(layout: &ResolvedLayout) -> u32 {
-    match layout.mode {
-        InstallMode::Ab => {
-            let root_a = layout.root_a_size_mb.unwrap_or(DEFAULT_AB_ROOT_SIZE_MB);
-            let root_b = layout.root_b_size_mb.unwrap_or(DEFAULT_AB_ROOT_SIZE_MB);
-            let state = layout.state_size_mb.unwrap_or(DEFAULT_AB_MIN_STATE_MB);
-            layout.efi_size_mb + root_a + root_b + state
-        }
-        InstallMode::Mutable => {
-            let root = layout.root_size_mb.unwrap_or(DEFAULT_MUTABLE_MIN_ROOT_MB);
-            layout.efi_size_mb + root
-        }
+/// The smallest size the partition that takes the remaining space may get:
+/// the same minimum an explicit size must meet.
+pub fn remaining_min_mb(mode: InstallMode) -> u32 {
+    match mode {
+        InstallMode::Ab => DEFAULT_AB_MIN_STATE_MB,
+        InstallMode::Mutable => DEFAULT_MUTABLE_MIN_ROOT_MB,
     }
 }
 
@@ -122,7 +118,7 @@ pub fn build_templates(layout: &ResolvedLayout) -> Vec<PartitionTemplate> {
                 label: "ROOT_A".to_string(),
                 gpt_type: "L".to_string(),
                 size_mb: layout.root_a_size_mb,
-                mountpoint: "/slots/A".to_string(),
+                mountpoint: "/".to_string(),
             },
             PartitionTemplate {
                 index: 3,
@@ -131,7 +127,7 @@ pub fn build_templates(layout: &ResolvedLayout) -> Vec<PartitionTemplate> {
                 label: "ROOT_B".to_string(),
                 gpt_type: "L".to_string(),
                 size_mb: layout.root_b_size_mb,
-                mountpoint: "/slots/B".to_string(),
+                mountpoint: NOT_MOUNTED.to_string(),
             },
             PartitionTemplate {
                 index: 4,

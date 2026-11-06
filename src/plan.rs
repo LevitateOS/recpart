@@ -1,5 +1,5 @@
 use crate::error::{ErrorCode, RecpartError, Result};
-use crate::policy::{build_templates, required_min_mb, resolve_layout_request};
+use crate::policy::{build_templates, remaining_min_mb, resolve_layout_request};
 use crate::types::{
     DiskTarget, InstallMode, LayoutRequest, PartitionPlan, PartitionTemplate, PLAN_SCHEMA_VERSION,
 };
@@ -7,18 +7,20 @@ use std::path::Path;
 
 const MB: u64 = 1024 * 1024;
 
-pub fn build_plan(disk: DiskTarget, mode: InstallMode) -> Result<PartitionPlan> {
-    build_plan_with_layout_request(disk, mode, LayoutRequest::default())
-}
-
-pub fn build_plan_with_layout_request(
+/// Plan the layout for `disk`; the disk must hold every fixed-size partition
+/// plus the policy minimum for the one that takes the remaining space.
+pub fn build_plan(
     disk: DiskTarget,
     mode: InstallMode,
     layout_request: LayoutRequest,
 ) -> Result<PartitionPlan> {
     let resolved_layout = resolve_layout_request(mode, &layout_request)?;
     let disk_mb = disk.size_bytes / MB;
-    let min_required = u64::from(required_min_mb(&resolved_layout));
+    let partitions = build_templates(&resolved_layout);
+    let min_required: u64 = partitions
+        .iter()
+        .map(|p| u64::from(p.size_mb.unwrap_or_else(|| remaining_min_mb(mode))))
+        .sum();
 
     if disk_mb < min_required {
         return Err(RecpartError::new(
@@ -30,8 +32,6 @@ pub fn build_plan_with_layout_request(
         ));
     }
 
-    let partitions = build_templates(&resolved_layout);
-    validate_partition_fit(&partitions, disk_mb, mode)?;
     let sfdisk_script = build_sfdisk_script(&partitions);
 
     Ok(PartitionPlan {
@@ -50,7 +50,7 @@ pub fn build_sfdisk_script(partitions: &[PartitionTemplate]) -> String {
     lines.push("label: gpt".to_string());
 
     for part in partitions {
-        let line = match (part.size_mb, part.index == 1 && part.gpt_type == "U") {
+        let line = match (part.size_mb, part.gpt_type == "U") {
             (Some(size_mb), true) => format!(",{size_mb}M,{},*", part.gpt_type),
             (Some(size_mb), false) => format!(",{size_mb}M,{}", part.gpt_type),
             (None, _) => format!(",,{}", part.gpt_type),
@@ -76,38 +76,4 @@ pub fn partition_device(disk: &Path, index: u8) -> String {
     } else {
         format!("{base}{index}")
     }
-}
-
-fn validate_partition_fit(
-    partitions: &[PartitionTemplate],
-    disk_mb: u64,
-    mode: InstallMode,
-) -> Result<()> {
-    let fixed_mb = partitions
-        .iter()
-        .filter_map(|p| p.size_mb.map(u64::from))
-        .sum::<u64>();
-    let has_remaining = partitions.iter().any(|p| p.size_mb.is_none());
-
-    if fixed_mb > disk_mb {
-        return Err(RecpartError::new(
-            ErrorCode::PlanGeneration,
-            "plan",
-            "sum of fixed partition sizes does not exceed disk size",
-            format!("fixed partition sum is {fixed_mb}MB, disk is {disk_mb}MB"),
-            "Reduce fixed partition sizes or select a larger disk.",
-        ));
-    }
-
-    if has_remaining && fixed_mb >= disk_mb {
-        return Err(RecpartError::new(
-            ErrorCode::PlanGeneration,
-            "plan",
-            "at least one MB remains for remaining-size partition",
-            format!("no free space left for remaining partition in mode {mode}"),
-            "Reduce fixed partition sizes or set explicit sizes for all partitions.",
-        ));
-    }
-
-    Ok(())
 }

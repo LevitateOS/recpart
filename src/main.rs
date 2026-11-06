@@ -1,20 +1,16 @@
 use clap::Parser;
-use recpart::cli::{run, Cli};
-use recpart::json::to_pretty_json;
+use recpart::cli::{run, to_json, Cli};
 use std::process::ExitCode;
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
-    let json_requested = cli.json_requested();
+    let json = cli.json;
 
     match run(cli) {
         Ok(()) => ExitCode::SUCCESS,
         Err(err) => {
-            if json_requested {
-                match to_pretty_json(&err.payload()) {
-                    Ok(json) => eprintln!("{}", json),
-                    Err(_) => eprintln!("recpart: {}", err),
-                }
+            if json {
+                eprintln!("{}", to_json(&err.payload()));
             } else {
                 eprintln!("recpart: {}", err);
             }

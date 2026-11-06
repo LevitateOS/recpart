@@ -1,12 +1,13 @@
 use crate::error::{ErrorCode, RecpartError, Result};
 use crate::handoff::build_handoff;
 use crate::plan::partition_device;
+use crate::policy::NOT_MOUNTED;
 use crate::preflight::{
-    ensure_block_device, ensure_disk_not_in_use, ensure_disk_not_mounted, ensure_disk_writable,
-    ensure_mount_root_safe, ensure_required_tools, ensure_root_for_apply, kernel_partition_names,
+    ensure_disk_not_in_use, ensure_disk_not_mounted, ensure_disk_writable, ensure_mount_root_safe,
+    ensure_required_tools, ensure_root_for_apply, kernel_partition_names,
 };
 use crate::types::{
-    ApplyOptions, ApplyResult, CommandRecord, InstallMode, MountMapping, PartitionPlan,
+    ApplyOptions, ApplyResult, CommandRecord, MountMapping, PartitionPlan, PartitionTemplate,
     APPLY_SCHEMA_VERSION,
 };
 use std::fs;
@@ -18,101 +19,99 @@ use std::time::{Duration, Instant};
 
 const CONFIRM_TOKEN: &str = "DESTROY";
 
+/// The three stages of apply; a failure is reported with its stage's code.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Phase {
+    Partition,
+    Format,
+    Mount,
+}
+
+impl Phase {
+    fn as_str(self) -> &'static str {
+        match self {
+            Phase::Partition => "partition",
+            Phase::Format => "format",
+            Phase::Mount => "mount",
+        }
+    }
+
+    fn error_code(self) -> ErrorCode {
+        match self {
+            Phase::Partition => ErrorCode::PartitionApplyFailed,
+            Phase::Format => ErrorCode::FormatFailed,
+            Phase::Mount => ErrorCode::MountFailed,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 enum ExecutionAction {
     Run {
-        phase: String,
+        phase: Phase,
         program: String,
         args: Vec<String>,
         stdin: Option<String>,
     },
-    CreateDir {
-        phase: String,
-        path: PathBuf,
-    },
     /// Wait for the kernel to expose exactly the planned partitions of the
     /// target disk. Runs once, after the new table is written and udev settled.
-    VerifyPartitions {
-        phase: String,
-    },
+    VerifyPartitions,
+    /// Create the mount point and mount the device there.
+    Mount { device: String, target: PathBuf },
 }
 
 pub fn execute_plan(plan: &PartitionPlan, opts: &ApplyOptions) -> Result<ApplyResult> {
-    execute_plan_with_reporter(plan, opts, None)
-}
-
-pub fn execute_plan_with_reporter(
-    plan: &PartitionPlan,
-    opts: &ApplyOptions,
-    mut reporter: Option<&mut dyn FnMut(&CommandRecord)>,
-) -> Result<ApplyResult> {
     ensure_mount_root_safe(&opts.mount_root)?;
 
-    if !opts.dry_run {
-        ensure_confirmation(opts.confirm_token.as_deref())?;
-        ensure_root_for_apply()?;
-        ensure_required_tools()?;
-        ensure_block_device(&plan.disk.path)?;
-        ensure_disk_writable(&plan.disk.path)?;
-        ensure_disk_not_mounted(&plan.disk.path)?;
-        ensure_disk_not_in_use(&plan.disk.path)?;
-    }
-
-    let actions = build_apply_actions(plan, &opts.mount_root);
-    let mounted = mount_map_for_plan(plan, &opts.mount_root);
-    let handoff = build_handoff(plan, mounted.clone());
-    let formatted_devices = formatted_devices(plan);
-
+    // The disk checks only read; dry-run reports what apply would refuse
+    // instead of stopping, so a preview says whether apply can run.
+    let disk_checks: [&dyn Fn() -> Result<()>; 5] = [
+        &|| ensure_root_for_apply(),
+        &|| ensure_required_tools(),
+        &|| ensure_disk_writable(&plan.disk.path),
+        &|| ensure_disk_not_mounted(&plan.disk.path),
+        &|| ensure_disk_not_in_use(&plan.disk.path),
+    ];
+    let mut warnings = Vec::new();
     if opts.dry_run {
-        let steps = actions
-            .iter()
-            .map(|action| CommandRecord {
-                phase: action.phase().to_string(),
-                command: action.rendered(),
-                program: action.program_name().to_string(),
-                args: action.args(),
-                status: None,
-                stdout: None,
-                stderr: None,
-                dry_run: true,
-            })
-            .collect::<Vec<_>>();
-
-        return Ok(ApplyResult {
-            schema_version: APPLY_SCHEMA_VERSION,
-            mode: plan.mode,
-            layout_request: plan.layout_request.clone(),
-            resolved_layout: plan.resolved_layout.clone(),
-            disk: plan.disk.clone(),
-            dry_run: true,
-            steps,
-            partition_map: plan.partitions.clone(),
-            formatted_devices,
-            mounted,
-            handoff,
-            warnings: vec![],
-        });
+        warnings.extend(disk_checks.iter().filter_map(|check| check().err()).map(|e| e.to_string()));
+    } else {
+        ensure_confirmation(opts.confirm_token.as_deref())?;
+        for check in disk_checks {
+            check()?;
+        }
     }
 
-    let mut records = Vec::with_capacity(actions.len());
-    let mut mounted_targets: Vec<String> = Vec::new();
-    for action in &actions {
-        let record = match run_action(action, plan, &opts.mount_root) {
-            Ok(record) => record,
-            Err(err) => return Err(rollback_mounts(err, &mounted_targets)),
-        };
-        if let ExecutionAction::Run { program, args, .. } = action {
-            if program == "mount" {
-                if let Some(target) = args.last() {
-                    mounted_targets.push(target.clone());
-                }
+    let actions = build_apply_actions(plan, &opts.mount_root)?;
+    let mounted: Vec<MountMapping> = actions
+        .iter()
+        .filter_map(|action| match action {
+            ExecutionAction::Mount { device, target } => Some(MountMapping {
+                path: target.to_string_lossy().to_string(),
+                device: device.clone(),
+            }),
+            _ => None,
+        })
+        .collect();
+    let handoff = build_handoff(plan, mounted.clone());
+
+    let steps = if opts.dry_run {
+        actions.iter().map(|action| action.record(true)).collect()
+    } else {
+        let mut records = Vec::with_capacity(actions.len());
+        let mut mounted_targets: Vec<String> = Vec::new();
+        for action in &actions {
+            let record = match run_action(action, plan, &opts.mount_root) {
+                Ok(record) => record,
+                Err(err) => return Err(rollback_mounts(err, &mounted_targets)),
+            };
+            if let ExecutionAction::Mount { target, .. } = action {
+                mounted_targets.push(target.to_string_lossy().to_string());
             }
+            records.push(record);
         }
-        if let Some(cb) = reporter.as_deref_mut() {
-            cb(&record);
-        }
-        records.push(record);
-    }
+        records
+    };
 
     Ok(ApplyResult {
         schema_version: APPLY_SCHEMA_VERSION,
@@ -120,13 +119,13 @@ pub fn execute_plan_with_reporter(
         layout_request: plan.layout_request.clone(),
         resolved_layout: plan.resolved_layout.clone(),
         disk: plan.disk.clone(),
-        dry_run: false,
-        steps: records,
+        dry_run: opts.dry_run,
+        steps,
         partition_map: plan.partitions.clone(),
-        formatted_devices,
+        formatted_devices: formatted_devices(plan),
         mounted,
         handoff,
-        warnings: vec![],
+        warnings,
     })
 }
 
@@ -139,15 +138,13 @@ fn rollback_mounts(mut err: RecpartError, mounted_targets: &[String]) -> Recpart
 
     let mut failed = Vec::new();
     for target in mounted_targets.iter().rev() {
-        let ok = Command::new("umount")
-            .arg(target)
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()
-            .map(|status| status.success())
-            .unwrap_or(false);
-        if !ok {
-            failed.push(target.clone());
+        match Command::new("umount").arg(target).output() {
+            Ok(output) if output.status.success() => {}
+            Ok(output) => failed.push(format!(
+                "{target} ({})",
+                String::from_utf8_lossy(&output.stderr).trim()
+            )),
+            Err(e) => failed.push(format!("{target} ({e})")),
         }
     }
 
@@ -181,143 +178,90 @@ fn ensure_confirmation(token: Option<&str>) -> Result<()> {
     ))
 }
 
-fn build_apply_actions(plan: &PartitionPlan, mount_root: &Path) -> Vec<ExecutionAction> {
+/// The filesystem-creation command for a planned partition.
+fn format_command(part: &PartitionTemplate, device: String) -> Result<(String, Vec<String>)> {
+    let (program, args) = match part.filesystem.as_str() {
+        "vfat" => ("mkfs.vfat", vec!["-F", "32", "-n", part.label.as_str()]),
+        "ext4" => ("mkfs.ext4", vec!["-F", "-L", part.label.as_str()]),
+        other => {
+            return Err(RecpartError::new(
+                ErrorCode::Internal,
+                "exec",
+                "planned filesystems are vfat or ext4",
+                format!("partition {} uses '{other}'", part.name),
+                "Fix the partition policy.",
+            ))
+        }
+    };
+    let mut args: Vec<String> = args.into_iter().map(str::to_string).collect();
+    args.push(device);
+    Ok((program.to_string(), args))
+}
+
+/// Every step of apply, derived from the plan's partition templates:
+/// partition the disk, format each partition as planned, then mount each
+/// partition that has a mount point at `<mount_root>/sysroot<mountpoint>`,
+/// parents first.
+fn build_apply_actions(plan: &PartitionPlan, mount_root: &Path) -> Result<Vec<ExecutionAction>> {
     let disk = plan.disk.path.to_string_lossy().to_string();
     let mut actions = vec![
         ExecutionAction::Run {
-            phase: "partition".to_string(),
+            phase: Phase::Partition,
             program: "wipefs".to_string(),
             // No --force: wipefs then refuses devices that are busy.
             args: vec!["-a".to_string(), disk.clone()],
             stdin: None,
         },
         ExecutionAction::Run {
-            phase: "partition".to_string(),
+            phase: Phase::Partition,
             program: "sfdisk".to_string(),
             args: vec![disk],
             stdin: Some(plan.sfdisk_script.clone()),
         },
         ExecutionAction::Run {
-            phase: "partition".to_string(),
+            phase: Phase::Partition,
             program: "udevadm".to_string(),
             args: vec!["settle".to_string(), "--timeout=10".to_string()],
             stdin: None,
         },
-        ExecutionAction::VerifyPartitions {
-            phase: "partition".to_string(),
-        },
+        ExecutionAction::VerifyPartitions,
     ];
 
-    let efi = partition_device(&plan.disk.path, 1);
-    actions.push(ExecutionAction::Run {
-        phase: "format".to_string(),
-        program: "mkfs.vfat".to_string(),
-        args: vec![
-            "-F".to_string(),
-            "32".to_string(),
-            "-n".to_string(),
-            "EFI".to_string(),
-            efi.clone(),
-        ],
-        stdin: None,
-    });
-
-    match plan.mode {
-        InstallMode::Ab => {
-            let root_a = partition_device(&plan.disk.path, 2);
-            let root_b = partition_device(&plan.disk.path, 3);
-            let state = partition_device(&plan.disk.path, 4);
-
-            for (label, dev) in [
-                ("ROOT_A", root_a.clone()),
-                ("ROOT_B", root_b),
-                ("STATE", state.clone()),
-            ] {
-                actions.push(ExecutionAction::Run {
-                    phase: "format".to_string(),
-                    program: "mkfs.ext4".to_string(),
-                    args: vec!["-F".to_string(), "-L".to_string(), label.to_string(), dev],
-                    stdin: None,
-                });
-            }
-
-            let sysroot = mount_root.join("sysroot");
-            actions.push(ExecutionAction::CreateDir {
-                phase: "mount".to_string(),
-                path: sysroot.clone(),
-            });
-            actions.push(ExecutionAction::Run {
-                phase: "mount".to_string(),
-                program: "mount".to_string(),
-                args: vec![root_a, sysroot.to_string_lossy().to_string()],
-                stdin: None,
-            });
-
-            let boot = sysroot.join("boot");
-            actions.push(ExecutionAction::CreateDir {
-                phase: "mount".to_string(),
-                path: boot.clone(),
-            });
-            actions.push(ExecutionAction::Run {
-                phase: "mount".to_string(),
-                program: "mount".to_string(),
-                args: vec![efi, boot.to_string_lossy().to_string()],
-                stdin: None,
-            });
-
-            let state_mount = sysroot.join("state");
-            actions.push(ExecutionAction::CreateDir {
-                phase: "mount".to_string(),
-                path: state_mount.clone(),
-            });
-            actions.push(ExecutionAction::Run {
-                phase: "mount".to_string(),
-                program: "mount".to_string(),
-                args: vec![state, state_mount.to_string_lossy().to_string()],
-                stdin: None,
-            });
-        }
-        InstallMode::Mutable => {
-            let root = partition_device(&plan.disk.path, 2);
-            actions.push(ExecutionAction::Run {
-                phase: "format".to_string(),
-                program: "mkfs.ext4".to_string(),
-                args: vec![
-                    "-F".to_string(),
-                    "-L".to_string(),
-                    "ROOT".to_string(),
-                    root.clone(),
-                ],
-                stdin: None,
-            });
-
-            let sysroot = mount_root.join("sysroot");
-            actions.push(ExecutionAction::CreateDir {
-                phase: "mount".to_string(),
-                path: sysroot.clone(),
-            });
-            actions.push(ExecutionAction::Run {
-                phase: "mount".to_string(),
-                program: "mount".to_string(),
-                args: vec![root, sysroot.to_string_lossy().to_string()],
-                stdin: None,
-            });
-
-            let boot = sysroot.join("boot");
-            actions.push(ExecutionAction::CreateDir {
-                phase: "mount".to_string(),
-                path: boot.clone(),
-            });
-            actions.push(ExecutionAction::Run {
-                phase: "mount".to_string(),
-                program: "mount".to_string(),
-                args: vec![efi, boot.to_string_lossy().to_string()],
-                stdin: None,
-            });
-        }
+    for part in &plan.partitions {
+        let (program, args) = format_command(part, partition_device(&plan.disk.path, part.index))?;
+        actions.push(ExecutionAction::Run {
+            phase: Phase::Format,
+            program,
+            args,
+            stdin: None,
+        });
     }
 
-    actions
+    let sysroot = install_root(mount_root);
+    let mut mounted: Vec<&PartitionTemplate> = plan
+        .partitions
+        .iter()
+        .filter(|part| part.mountpoint != NOT_MOUNTED)
+        .collect();
+    mounted.sort_by_key(|part| part.mountpoint.trim_end_matches('/').matches('/').count());
+    for part in mounted {
+        let relative = part.mountpoint.trim_start_matches('/');
+        actions.push(ExecutionAction::Mount {
+            device: partition_device(&plan.disk.path, part.index),
+            target: if relative.is_empty() {
+                sysroot.clone()
+            } else {
+                sysroot.join(relative)
+            },
+        });
+    }
+
+    Ok(actions)
+}
+
+/// Where the installed system's root is mounted during installation.
+pub fn install_root(mount_root: &Path) -> PathBuf {
+    mount_root.join("sysroot")
 }
 
 fn formatted_devices(plan: &PartitionPlan) -> Vec<String> {
@@ -327,87 +271,49 @@ fn formatted_devices(plan: &PartitionPlan) -> Vec<String> {
         .collect()
 }
 
-fn mount_map_for_plan(plan: &PartitionPlan, mount_root: &Path) -> Vec<MountMapping> {
-    match plan.mode {
-        InstallMode::Mutable => vec![
-            MountMapping {
-                path: mount_root.join("sysroot").to_string_lossy().to_string(),
-                device: partition_device(&plan.disk.path, 2),
-            },
-            MountMapping {
-                path: mount_root
-                    .join("sysroot")
-                    .join("boot")
-                    .to_string_lossy()
-                    .to_string(),
-                device: partition_device(&plan.disk.path, 1),
-            },
-        ],
-        InstallMode::Ab => vec![
-            MountMapping {
-                path: mount_root.join("sysroot").to_string_lossy().to_string(),
-                device: partition_device(&plan.disk.path, 2),
-            },
-            MountMapping {
-                path: mount_root
-                    .join("sysroot")
-                    .join("boot")
-                    .to_string_lossy()
-                    .to_string(),
-                device: partition_device(&plan.disk.path, 1),
-            },
-            MountMapping {
-                path: mount_root
-                    .join("sysroot")
-                    .join("state")
-                    .to_string_lossy()
-                    .to_string(),
-                device: partition_device(&plan.disk.path, 4),
-            },
-        ],
-    }
-}
-
 fn run_action(
     action: &ExecutionAction,
     plan: &PartitionPlan,
     mount_root: &Path,
 ) -> Result<CommandRecord> {
+    let fail = |phase: Phase, expected: String, observed: String| {
+        RecpartError::new(
+            phase.error_code(),
+            "exec",
+            expected,
+            observed,
+            format!(
+                "Fix the reported {} failure and retry. Disk: {}. If partial mounts were created under {}, unmount them before retry.",
+                phase.as_str(),
+                plan.disk.path.display(),
+                mount_root.display()
+            ),
+        )
+    };
+    let mut record = action.record(false);
     match action {
-        ExecutionAction::CreateDir { phase, path } => {
-            fs::create_dir_all(path).map_err(|err| {
-                RecpartError::new(
-                    ErrorCode::MountFailed,
-                    "exec",
-                    format!("directory '{}' can be created", path.display()),
-                    err.to_string(),
-                    "Ensure mount root is writable and path permissions are correct.",
-                )
-            })?;
-
-            Ok(CommandRecord {
-                phase: phase.clone(),
-                command: action.rendered(),
-                program: "mkdir".to_string(),
-                args: vec!["-p".to_string(), path.to_string_lossy().to_string()],
-                status: Some(0),
-                stdout: None,
-                stderr: None,
-                dry_run: false,
-            })
-        }
-        ExecutionAction::VerifyPartitions { phase } => {
+        ExecutionAction::VerifyPartitions => {
             let found = wait_for_partition_devices(plan, Duration::from_secs(10))?;
-            Ok(CommandRecord {
-                phase: phase.clone(),
-                command: action.rendered(),
-                program: action.program_name().to_string(),
-                args: action.args(),
-                status: Some(0),
-                stdout: Some(found.join(" ")),
-                stderr: None,
-                dry_run: false,
-            })
+            record.status = Some(0);
+            record.stdout = Some(found.join(" "));
+        }
+        ExecutionAction::Mount { device, target } => {
+            fs::create_dir_all(target).map_err(|err| {
+                fail(Phase::Mount, format!("'{}' can be created", target.display()), err.to_string())
+            })?;
+            let output = Command::new("mount")
+                .arg(device)
+                .arg(target)
+                .output()
+                .map_err(|err| fail(Phase::Mount, "mount starts".to_string(), err.to_string()))?;
+            record.status = output.status.code();
+            if !output.status.success() {
+                return Err(fail(
+                    Phase::Mount,
+                    "mount exits with status 0".to_string(),
+                    String::from_utf8_lossy(&output.stderr).trim().to_string(),
+                ));
+            }
         }
         ExecutionAction::Run {
             phase,
@@ -416,95 +322,37 @@ fn run_action(
             stdin,
         } => {
             let mut cmd = Command::new(program);
-            cmd.args(args);
-            cmd.stdout(Stdio::piped());
-            cmd.stderr(Stdio::piped());
+            cmd.args(args).stdout(Stdio::piped()).stderr(Stdio::piped());
             if stdin.is_some() {
                 cmd.stdin(Stdio::piped());
             }
-
-            let mut child = cmd.spawn().map_err(|err| {
-                RecpartError::new(
-                    classify_phase_error(phase),
-                    "exec",
-                    format!("{} starts successfully", program),
-                    err.to_string(),
-                    "Verify command exists and permissions are sufficient.",
-                )
-            })?;
-
-            if let Some(stdin_payload) = stdin {
-                if let Some(mut handle) = child.stdin.take() {
-                    handle.write_all(stdin_payload.as_bytes()).map_err(|err| {
-                        RecpartError::new(
-                            classify_phase_error(phase),
-                            "exec",
-                            format!("{} accepts stdin payload", program),
-                            err.to_string(),
-                            "Inspect generated partition script and command compatibility.",
-                        )
-                    })?;
-                }
+            let mut child = cmd
+                .spawn()
+                .map_err(|err| fail(*phase, format!("{program} starts successfully"), err.to_string()))?;
+            if let (Some(payload), Some(mut handle)) = (stdin, child.stdin.take()) {
+                handle.write_all(payload.as_bytes()).map_err(|err| {
+                    fail(*phase, format!("{program} accepts stdin payload"), err.to_string())
+                })?;
             }
-
-            let output = child.wait_with_output().map_err(|err| {
-                RecpartError::new(
-                    classify_phase_error(phase),
-                    "exec",
-                    format!("{} exits cleanly", program),
-                    err.to_string(),
-                    "Inspect system logs and command invocation.",
-                )
-            })?;
-
+            let output = child
+                .wait_with_output()
+                .map_err(|err| fail(*phase, format!("{program} exits cleanly"), err.to_string()))?;
             let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
             let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
             let status = output.status.code().unwrap_or(-1);
-
             if !output.status.success() {
-                return Err(RecpartError::new(
-                    classify_phase_error(phase),
-                    "exec",
-                    format!("{} exits with status 0", program),
+                return Err(fail(
+                    *phase,
+                    format!("{program} exits with status 0"),
                     format!("exit {status}; stderr: {stderr}"),
-                    format!(
-                        "Fix the reported {} failure and retry. Disk: {}. If partial mounts were created under {}, unmount them before retry.",
-                        phase,
-                        plan.disk.path.display(),
-                        mount_root.display()
-                    ),
                 ));
             }
-
-            Ok(CommandRecord {
-                phase: phase.clone(),
-                command: action.rendered(),
-                program: program.clone(),
-                args: args.clone(),
-                status: Some(status),
-                stdout: if stdout.is_empty() {
-                    None
-                } else {
-                    Some(stdout)
-                },
-                stderr: if stderr.is_empty() {
-                    None
-                } else {
-                    Some(stderr)
-                },
-                dry_run: false,
-            })
+            record.status = Some(status);
+            record.stdout = (!stdout.is_empty()).then_some(stdout);
+            record.stderr = (!stderr.is_empty()).then_some(stderr);
         }
     }
-}
-
-fn classify_phase_error(phase: &str) -> ErrorCode {
-    match phase {
-        "partition" => ErrorCode::PartitionApplyFailed,
-        "format" => ErrorCode::FormatFailed,
-        "mount" => ErrorCode::MountFailed,
-        _ => ErrorCode::Internal,
-    }
+    Ok(record)
 }
 
 /// Wait until the kernel exposes exactly the planned partitions as children of
@@ -550,7 +398,7 @@ fn wait_for_partition_devices(plan: &PartitionPlan, timeout: Duration) -> Result
                     kernel.join(", "),
                     missing_nodes.join(", ")
                 ),
-                "Check dmesg for partition table errors, run 'partprobe' or 'udevadm settle', then retry.",
+                "Check dmesg for partition table errors, run 'udevadm settle', then retry.",
             ));
         }
 
@@ -559,45 +407,42 @@ fn wait_for_partition_devices(plan: &PartitionPlan, timeout: Duration) -> Result
 }
 
 impl ExecutionAction {
-    fn phase(&self) -> &str {
+    fn phase(&self) -> Phase {
         match self {
-            ExecutionAction::Run { phase, .. } => phase,
-            ExecutionAction::CreateDir { phase, .. } => phase,
-            ExecutionAction::VerifyPartitions { phase } => phase,
+            ExecutionAction::Run { phase, .. } => *phase,
+            ExecutionAction::VerifyPartitions => Phase::Partition,
+            ExecutionAction::Mount { .. } => Phase::Mount,
         }
     }
 
-    fn rendered(&self) -> String {
+    fn program_and_args(&self) -> (String, Vec<String>) {
         match self {
-            ExecutionAction::Run { program, args, .. } => {
-                if args.is_empty() {
-                    program.clone()
-                } else {
-                    format!("{} {}", program, args.join(" "))
-                }
-            }
-            ExecutionAction::CreateDir { path, .. } => format!("mkdir -p {}", path.display()),
-            ExecutionAction::VerifyPartitions { .. } => {
-                "verify-partitions (kernel exposes planned partitions)".to_string()
-            }
+            ExecutionAction::Run { program, args, .. } => (program.clone(), args.clone()),
+            ExecutionAction::VerifyPartitions => ("verify-partitions".to_string(), Vec::new()),
+            ExecutionAction::Mount { device, target } => (
+                "mount".to_string(),
+                vec![device.clone(), target.to_string_lossy().to_string()],
+            ),
         }
     }
 
-    fn program_name(&self) -> &str {
-        match self {
-            ExecutionAction::Run { program, .. } => program,
-            ExecutionAction::CreateDir { .. } => "mkdir",
-            ExecutionAction::VerifyPartitions { .. } => "verify-partitions",
-        }
-    }
-
-    fn args(&self) -> Vec<String> {
-        match self {
-            ExecutionAction::Run { args, .. } => args.clone(),
-            ExecutionAction::CreateDir { path, .. } => {
-                vec!["-p".to_string(), path.to_string_lossy().to_string()]
-            }
-            ExecutionAction::VerifyPartitions { .. } => Vec::new(),
+    /// The step as reported in JSON, before it has run.
+    fn record(&self, dry_run: bool) -> CommandRecord {
+        let (program, args) = self.program_and_args();
+        let command = if args.is_empty() {
+            program.clone()
+        } else {
+            format!("{} {}", program, args.join(" "))
+        };
+        CommandRecord {
+            phase: self.phase().as_str().to_string(),
+            command,
+            program,
+            args,
+            status: None,
+            stdout: None,
+            stderr: None,
+            dry_run,
         }
     }
 }

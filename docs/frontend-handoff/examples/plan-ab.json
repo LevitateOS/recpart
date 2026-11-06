@@ -18,8 +18,8 @@
   },
   "partitions": [
     {"index": 1, "name": "efi", "filesystem": "vfat", "label": "EFI", "gpt_type": "U", "size_mb": 1024, "mountpoint": "/boot"},
-    {"index": 2, "name": "root_a", "filesystem": "ext4", "label": "ROOT_A", "gpt_type": "L", "size_mb": 20480, "mountpoint": "/slots/A"},
-    {"index": 3, "name": "root_b", "filesystem": "ext4", "label": "ROOT_B", "gpt_type": "L", "size_mb": 20480, "mountpoint": "/slots/B"},
+    {"index": 2, "name": "root_a", "filesystem": "ext4", "label": "ROOT_A", "gpt_type": "L", "size_mb": 20480, "mountpoint": "/"},
+    {"index": 3, "name": "root_b", "filesystem": "ext4", "label": "ROOT_B", "gpt_type": "L", "size_mb": 20480, "mountpoint": "none"},
     {"index": 4, "name": "state", "filesystem": "ext4", "label": "STATE", "gpt_type": "L", "size_mb": null, "mountpoint": "/state"}
   ],
   "sfdisk_script": "label: gpt\n,1024M,U,*\n,20480M,L\n,20480M,L\n,,L\n"

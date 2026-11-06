@@ -8,7 +8,7 @@ pub const HANDOFF_SCHEMA_VERSION: u32 = 1;
 pub const ERROR_SCHEMA_VERSION: u32 = 1;
 pub const DISK_LIST_SCHEMA_VERSION: u32 = 1;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, clap::ValueEnum)]
 #[serde(rename_all = "snake_case")]
 pub enum InstallMode {
     #[default]
@@ -35,10 +35,8 @@ pub struct DiskTarget {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DiskInventory {
-    pub path: PathBuf,
-    pub size_bytes: u64,
-    pub logical_sector_bytes: u32,
-    pub physical_sector_bytes: u32,
+    #[serde(flatten)]
+    pub target: DiskTarget,
     pub model: String,
     pub transport: String,
     pub read_only: bool,
@@ -72,12 +70,24 @@ pub struct PartitionPlan {
     pub sfdisk_script: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+/// Partition sizes the caller asked for; unset sizes take the policy default.
+/// The fields are also recpart's `--<field>` CLI flags.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default, clap::Args)]
 pub struct LayoutRequest {
+    /// EFI partition size in MB
+    #[arg(long)]
     pub efi_size_mb: Option<u32>,
+    /// Mutable root partition size in MB (mutable mode only)
+    #[arg(long)]
     pub root_size_mb: Option<u32>,
+    /// A/B slot A partition size in MB (ab mode only)
+    #[arg(long)]
     pub root_a_size_mb: Option<u32>,
+    /// A/B slot B partition size in MB (ab mode only)
+    #[arg(long)]
     pub root_b_size_mb: Option<u32>,
+    /// A/B state partition size in MB (ab mode only). Omit to use remaining space.
+    #[arg(long)]
     pub state_size_mb: Option<u32>,
 }
 

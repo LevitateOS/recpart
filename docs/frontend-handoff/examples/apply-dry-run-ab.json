@@ -24,8 +24,8 @@
   ],
   "partition_map": [
     {"index": 1, "name": "efi", "filesystem": "vfat", "label": "EFI", "gpt_type": "U", "size_mb": 1024, "mountpoint": "/boot"},
-    {"index": 2, "name": "root_a", "filesystem": "ext4", "label": "ROOT_A", "gpt_type": "L", "size_mb": 20480, "mountpoint": "/slots/A"},
-    {"index": 3, "name": "root_b", "filesystem": "ext4", "label": "ROOT_B", "gpt_type": "L", "size_mb": 20480, "mountpoint": "/slots/B"},
+    {"index": 2, "name": "root_a", "filesystem": "ext4", "label": "ROOT_A", "gpt_type": "L", "size_mb": 20480, "mountpoint": "/"},
+    {"index": 3, "name": "root_b", "filesystem": "ext4", "label": "ROOT_B", "gpt_type": "L", "size_mb": 20480, "mountpoint": "none"},
     {"index": 4, "name": "state", "filesystem": "ext4", "label": "STATE", "gpt_type": "L", "size_mb": null, "mountpoint": "/state"}
   ],
   "formatted_devices": ["/dev/vda1", "/dev/vda2", "/dev/vda3", "/dev/vda4"],
@@ -56,7 +56,7 @@
       "slot_b_device": "/dev/vda3",
       "notes": [
         "A/B mode defaults install target to slot A for first install run.",
-        "Use recab to manage active/inactive slot transitions after installation."
+        "After validation, choose the next boot slot with recab set-next <A|B>."
       ]
     }
   },
