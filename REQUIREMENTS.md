@@ -23,7 +23,7 @@ layout orchestration and safe handoff to existing installation tools.
 8. [Handoff Contract](#8-handoff-contract)
 9. [Error Handling](#9-error-handling)
 10. [Security](#10-security)
-11. [Conformance and Traceability](#11-conformance-and-traceability)
+11. [Validation](#11-validation)
 
 ---
 
@@ -113,34 +113,8 @@ actionable and explicit.
 
 ## 4. UI and UX Requirements
 
-### 4.1 Primary UI Target
-
-**REQ-UI-001**: The primary UI layout target MUST be `960x1080` (half-width
-1080p design baseline).
-
-**REQ-UI-002**: Core workflow screens MUST be readable at the primary target
-without horizontal scrolling.
-
-### 4.2 Terminal Constraints
-
-**REQ-UI-010**: `recpart` MUST support a minimum terminal size of `80x24`.
-
-**REQ-UI-011**: If terminal size is below minimum, `recpart` MUST fail with an
-explicit message describing required dimensions.
-
-### 4.3 Wizard Flow
-
-**REQ-UI-020**: The wizard MUST include, at minimum:
-
-1. Disk selection
-2. Mode selection (`ab` default, `mutable`)
-3. Plan preview (including generated partition script)
-4. Explicit destructive confirmation
-5. Execution progress view
-6. Final handoff summary
-
-**REQ-UI-021**: The destructive confirmation step MUST require deliberate user
-action and clearly identify target disk and selected mode.
+The installer UI is `tui/apps/install/disk-plan`; its pages are its own
+(`src/domain/flow.ts`). recpart's part is the JSON contract it renders.
 
 ---
 
@@ -233,8 +207,9 @@ prints intended changes without modifying disk state.
 
 ### 8.1 Downstream Integration
 
-**REQ-HANDOFF-001**: On successful apply, `recpart` MUST print clear next-step
-commands for downstream tooling (`recstrap`, `recfstab`, `recchroot`).
+**REQ-HANDOFF-001**: On successful apply, `recpart` MUST report the install
+target and mounts as data; the next steps belong to the installer UI and live
+docs, not to recpart.
 
 **REQ-HANDOFF-002**: For `ab` mode, handoff output MUST include slot-target
 context needed by downstream A/B-aware tooling (`recab` and wrappers).

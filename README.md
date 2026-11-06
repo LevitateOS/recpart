@@ -28,36 +28,20 @@ backend JSON contracts.
 - Integrity policy enforcement (dm-verity, signature verification, measured boot).
 - Full install automation (rootfs extraction, chroot config, service enablement).
 
-## Planned UX
+## How It Works
 
-1. Select target disk.
-2. Select layout mode (`ab` default, `mutable`).
-3. Show partition plan and generated `sfdisk` script.
-4. Explicit destructive confirmation.
-5. Apply partition table.
-6. Format filesystems and apply labels.
-7. Mount targets under a predictable tree for downstream tools.
-8. Print next commands (`recstrap`, `recfstab`, `recchroot`).
-
-## Planned Components
-
-- `plan` module:
-  - deterministic partition plan model
-  - mode-specific templates
-  - `sfdisk` script generation
-- `exec` module:
-  - command runner with structured logs
-  - idempotent safety checks
+`plan` derives the partition templates (filesystem, label, installed mount
+point) for the mode and the `sfdisk` script; `apply` runs exactly those:
+partition, format, then mount at `<mount-root>/sysroot`, and reports a
+structured handoff (install target, mounts, A/B slot devices). `apply
+--dry-run` lists the steps and what apply would refuse. The installer's next
+steps (recstrap, recfstab, recchroot) are the installer UI's and live docs'.
 
 ## Integration Contract
 
 - Input: selected disk + mode + optional layout request values (policy defaults apply when omitted).
-- Output: mounted target topology + machine-readable summary.
-- Downstream tools:
-  - `recstrap`
-  - `recfstab`
-  - `recchroot`
-  - `recab` (A/B mode consumers)
+- Output: mounted target topology + machine-readable summary (JSON Schemas in
+  `docs/frontend-handoff/schemas/`, generated from `src/types.rs`).
 
 ## Error Codes
 

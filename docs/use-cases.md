@@ -47,5 +47,4 @@ cargo test -p recpart --test e2e_real_disk -- --ignored \
 - Destructive scenario UC-003 is intentionally ignored by default.
 - All automation paths should prefer JSON outputs and parse schema-versioned payloads.
 - Frontend teams should consume scenario expectations together with:
-  - `docs/frontend-handoff/state-machine.md`
   - `docs/frontend-handoff/schemas/*.json`
