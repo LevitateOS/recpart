@@ -10,7 +10,7 @@ It does not perform full OS installation.
 ## Frontend
 
 An interactive flow over recpart's JSON lives at `tui/apps/install/disk-plan`;
-it ships on no ISO yet, so the live install guide runs recpart directly.
+both live ISOs ship it as the `disk-plan` command.
 
 ## Goals
 
