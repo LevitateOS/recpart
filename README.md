@@ -101,7 +101,7 @@ was made for: `disk` (path, size, sector sizes), `disk_serial` and `table_id`
 it, so the confirm page can say "a LUKS container on the whole disk is
 erased"; otherwise it is empty. `apply` runs it:
 shrink, write the table (after `wipefs -a` when the whole disk is erased),
-grow, format, mount at `<mount-root>/sysroot`, then `swapon` the swap
+grow, format, mount at `<mount-root>` (`/mnt` by default), then `swapon` the swap
 partitions and swap file so recfstab finds them; it reports a structured
 handoff (install target, mounts, swaps, A/B slot devices). `apply --dry-run`
 lists the steps and what apply would refuse.

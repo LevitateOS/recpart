@@ -49,8 +49,7 @@ impl LoopDisk {
 
 impl Drop for LoopDisk {
     fn drop(&mut self) {
-        let sysroot = self.mount_root.join("sysroot");
-        let _ = Command::new("umount").arg("-R").arg(&sysroot).status();
+        let _ = Command::new("umount").arg("-R").arg(&self.mount_root).status();
         let _ = Command::new("losetup").args(["-d", &self.device]).status();
     }
 }
@@ -100,8 +99,7 @@ fn ab_layout_is_planned_applied_and_handed_off() {
     assert_eq!(seen, ["EFI vfat", "ROOT_A ext4", "ROOT_B ext4", "STATE ext4"]);
 
     // ...and the handoff names what is really mounted, slot B left unmounted.
-    let sysroot = disk.mount_root.join("sysroot");
-    assert_eq!(applied.handoff.install_target, sysroot.to_str().unwrap());
+    assert_eq!(applied.handoff.install_target, mount_root);
     for mount in &applied.handoff.mount_map {
         let source = run("findmnt", &["-nr", "-o", "SOURCE", "--mountpoint", &mount.path]);
         assert_eq!(source.trim(), mount.device, "{} is not mounted from {}", mount.path, mount.device);

@@ -298,7 +298,7 @@ fn resize_actions(change: &PartitionChange) -> Vec<ExecutionAction> {
 /// Every step of apply, derived from the plan: shrink filesystems, write the
 /// table (after erasing the disk, for a template or a new table), grow
 /// filesystems, format each created or formatted partition, mount each
-/// partition that has a mount point at `<mount_root>/sysroot<mountpoint>`,
+/// partition that has a mount point at `<mount_root><mountpoint>`,
 /// parents first, then activate swap.
 fn build_apply_actions(plan: &PartitionPlan, mount_root: &Path) -> Vec<ExecutionAction> {
     let disk = plan.disk.path.to_string_lossy().to_string();
@@ -401,9 +401,10 @@ fn required_programs(actions: &[ExecutionAction]) -> Vec<String> {
     programs
 }
 
-/// Where the installed system's root is mounted during installation.
+/// Where the installed system's root is mounted during installation: the mount
+/// root itself, so the guides' `recstrap /mnt` is the target.
 fn install_root(mount_root: &Path) -> PathBuf {
-    mount_root.join("sysroot")
+    mount_root.to_path_buf()
 }
 
 fn formatted_devices(plan: &PartitionPlan) -> Vec<String> {
