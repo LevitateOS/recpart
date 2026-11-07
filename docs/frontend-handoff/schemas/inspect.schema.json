@@ -26,6 +26,14 @@
       "format": "uint32",
       "minimum": 0
     },
+    "signatures": {
+      "description": "Signatures on the whole disk itself, outside any partition: a LUKS\ncontainer, a filesystem or an LVM PV written to the bare disk (the\npartition table's own `gpt`, `PMBR` and `dos` are not listed). Empty\nwhen there are none, or when neither wipefs nor lsblk could tell.",
+      "type": "array",
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/DiskSignature"
+      }
+    },
     "table": {
       "$ref": "#/$defs/TableType"
     },
@@ -114,6 +122,38 @@
         "rotational",
         "removable",
         "read_only"
+      ]
+    },
+    "DiskSignature": {
+      "description": "A signature on the whole disk, as `wipefs --no-act` reports it.",
+      "type": "object",
+      "properties": {
+        "kind": {
+          "description": "wipefs's TYPE: `crypto_LUKS`, `btrfs`, `LVM2_member`, `ext4`, ...",
+          "type": "string"
+        },
+        "label": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "offset_bytes": {
+          "description": "Where the signature's magic is, in bytes from the start of the disk;\n0 when only lsblk's FSTYPE was readable (wipefs needs root).",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "uuid": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind",
+        "offset_bytes"
       ]
     },
     "FreeGap": {

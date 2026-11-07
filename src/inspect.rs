@@ -3,12 +3,15 @@
 //! lsblk's udev view; filesystems, labels, UUIDs and mounts come from lsblk.
 //! The used space of an unmounted filesystem is read with that filesystem's
 //! own tool (dumpe2fs, fsck.fat -n, ntfsresize --info), which needs root.
+//! Signatures on the bare disk (LUKS, a filesystem, an LVM PV) come from
+//! `wipefs --no-act` (root), else from lsblk's FSTYPE of the disk.
 
 use crate::error::{ErrorCode, RecpartError, Result};
 use crate::plan::partition_device;
 use crate::preflight::{lsblk, query_disk};
 use crate::types::{
-    DiskInventory, FreeGap, InspectResult, PartitionInfo, TableType, INSPECT_SCHEMA_VERSION,
+    DiskInventory, DiskSignature, FreeGap, InspectResult, PartitionInfo, TableType,
+    INSPECT_SCHEMA_VERSION,
 };
 use serde::Deserialize;
 use std::fs;
@@ -20,6 +23,9 @@ pub const MIB: u64 = 1024 * 1024;
 /// The columns `inspect` reads for the disk and each partition.
 const PART_COLUMNS: &str =
     "PATH,TYPE,START,SIZE,PARTN,PARTTYPE,PARTLABEL,PARTUUID,PARTFLAGS,FSTYPE,LABEL,UUID,FSSIZE,FSUSED,MOUNTPOINTS,PTTYPE,PTUUID";
+
+/// wipefs's names for partition tables, which `table` already reports.
+const TABLE_SIGNATURES: &[&str] = &["gpt", "PMBR", "dos"];
 
 /// GPT keeps 128 entries of 128 bytes, plus a header sector, at each end.
 const GPT_ENTRIES_BYTES: u64 = 128 * 128;
@@ -51,6 +57,23 @@ struct LsblkPart {
     mountpoints: Vec<Option<String>>,
     pttype: Option<String>,
     ptuuid: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct WipefsJson {
+    #[serde(default)]
+    signatures: Vec<WipefsSignature>,
+}
+
+#[derive(Debug, Deserialize)]
+struct WipefsSignature {
+    device: String,
+    /// Hex, `0x438`.
+    offset: String,
+    #[serde(rename = "type")]
+    kind: String,
+    uuid: Option<String>,
+    label: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -170,6 +193,7 @@ pub fn inspect_disk(path: &Path) -> Result<InspectResult> {
             .collect(),
     };
     partitions.sort_by_key(|p| p.start_bytes);
+    let signatures = read_wipefs(&disk.target.path).unwrap_or_else(|| lsblk_signature(whole));
     Ok(finish_inventory(
         disk,
         table,
@@ -177,7 +201,64 @@ pub fn inspect_disk(path: &Path) -> Result<InspectResult> {
         usable_start_bytes,
         usable_end_bytes,
         partitions,
+        signatures,
     ))
+}
+
+/// The signatures on the whole disk itself, from `wipefs --no-act` (it
+/// changes nothing, and lists only the device's own signatures, not its
+/// partitions'). `None` when wipefs is missing or cannot read the disk.
+fn read_wipefs(disk: &Path) -> Option<Vec<DiskSignature>> {
+    let output = Command::new("wipefs")
+        .args(["--no-act", "--json"])
+        .arg(disk)
+        .env("LC_ALL", "C")
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    // Some versions print nothing at all for a blank device.
+    if output.stdout.iter().all(u8::is_ascii_whitespace) {
+        return Some(Vec::new());
+    }
+    let listed: WipefsJson = serde_json::from_slice(&output.stdout).ok()?;
+    let full = disk.to_string_lossy();
+    let name = disk.file_name().map(|n| n.to_string_lossy()).unwrap_or_default();
+    let nonempty = |v: Option<String>| v.filter(|v| !v.trim().is_empty());
+    listed
+        .signatures
+        .into_iter()
+        .filter(|s| s.device == full || s.device == name)
+        .filter(|s| !TABLE_SIGNATURES.contains(&s.kind.as_str()))
+        .map(|s| {
+            // An offset it can't read makes the whole answer unreliable: fall back.
+            let offset_bytes = u64::from_str_radix(s.offset.trim().trim_start_matches("0x"), 16).ok()?;
+            Some(DiskSignature {
+                kind: s.kind,
+                offset_bytes,
+                uuid: nonempty(s.uuid),
+                label: nonempty(s.label),
+            })
+        })
+        .collect()
+}
+
+/// Without wipefs: the filesystem udev found on the bare disk, if any (its
+/// offset is unknown, so 0).
+fn lsblk_signature(whole: Option<&LsblkPart>) -> Vec<DiskSignature> {
+    let nonempty = |v: Option<&String>| v.filter(|v| !v.trim().is_empty()).cloned();
+    whole
+        .and_then(|d| nonempty(d.fstype.as_ref()).map(|kind| (d, kind)))
+        .filter(|(_, kind)| !TABLE_SIGNATURES.contains(&kind.as_str()))
+        .map(|(d, kind)| DiskSignature {
+            kind,
+            offset_bytes: 0,
+            uuid: nonempty(d.uuid.as_ref()),
+            label: nonempty(d.label.as_ref()),
+        })
+        .into_iter()
+        .collect()
 }
 
 /// Free gaps and resize bounds, from the partitions: shared by `inspect` and
@@ -189,6 +270,7 @@ pub fn finish_inventory(
     usable_start_bytes: u64,
     usable_end_bytes: u64,
     mut partitions: Vec<PartitionInfo>,
+    signatures: Vec<DiskSignature>,
 ) -> InspectResult {
     let extents: Vec<(u64, u64)> = partitions
         .iter()
@@ -222,6 +304,7 @@ pub fn finish_inventory(
         usable_end_bytes,
         partitions,
         free,
+        signatures,
     }
 }
 
@@ -253,6 +336,7 @@ pub fn load_inventory(path: &Path) -> Result<InspectResult> {
         inventory.usable_start_bytes,
         inventory.usable_end_bytes,
         partitions,
+        inventory.signatures,
     ))
 }
 

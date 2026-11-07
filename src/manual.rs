@@ -195,6 +195,25 @@ pub fn build_manual_plan(
             ));
         }
     }
+    if inventory.table == TableType::None && !layout.new_table && !inventory.signatures.is_empty() {
+        // Without a table the disk is erased whole; what is on it is no
+        // partition the summary would list, so the layout says so itself.
+        return Err(refuse(
+            ErrorCode::InvalidLayout,
+            "a layout for a disk with no partition table but with data on the whole disk sets new_table",
+            format!(
+                "{} has no partition table, and holds {} on the whole disk",
+                disk.path.display(),
+                inventory
+                    .signatures
+                    .iter()
+                    .map(|s| s.kind.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+            "Set \"new_table\": true to erase it (the plan's erased_signatures lists what is lost), or pick another disk.",
+        ));
+    }
     let new_table = layout.new_table || inventory.table == TableType::None;
     if !new_table && inventory.table == TableType::Mbr {
         return Err(refuse(
@@ -619,6 +638,13 @@ pub fn build_manual_plan(
         wipes_disk: new_table,
         summary,
         swap_file,
+        disk_serial: inventory.disk.serial.clone(),
+        table_id: inventory.table_id.clone(),
+        erased_signatures: if new_table {
+            inventory.signatures.clone()
+        } else {
+            Vec::new()
+        },
     })
 }
 

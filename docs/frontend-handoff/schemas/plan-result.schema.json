@@ -6,6 +6,19 @@
     "disk": {
       "$ref": "#/$defs/DiskTarget"
     },
+    "disk_serial": {
+      "description": "The serial of the disk the plan was made for (`inspect`'s\n`disk.serial`): with `disk` and `table_id`, it names the disk\n`apply --expect` must still find.",
+      "type": "string",
+      "default": ""
+    },
+    "erased_signatures": {
+      "description": "What apply's `wipefs -a` erases besides the partitions (`inspect`'s\n`signatures`): listed whenever `wipes_disk`, so the confirm page can\nsay a LUKS container or a filesystem on the bare disk is lost. Empty\nwhen the plan keeps the table.",
+      "type": "array",
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/DiskSignature"
+      }
+    },
     "layout_request": {
       "$ref": "#/$defs/LayoutRequest"
     },
@@ -62,6 +75,14 @@
       ],
       "default": null
     },
+    "table_id": {
+      "description": "The partition table id the disk had when the plan was made\n(`inspect`'s `table_id`); `None` when it had no table, or no id.",
+      "type": [
+        "string",
+        "null"
+      ],
+      "default": null
+    },
     "wipes_disk": {
       "description": "Apply erases the whole disk (`wipefs -a`) before writing the new\ntable: always for a template, and for a manual layout with `new_table`.",
       "type": "boolean",
@@ -106,6 +127,38 @@
           "type": "string",
           "const": "untouched"
         }
+      ]
+    },
+    "DiskSignature": {
+      "description": "A signature on the whole disk, as `wipefs --no-act` reports it.",
+      "type": "object",
+      "properties": {
+        "kind": {
+          "description": "wipefs's TYPE: `crypto_LUKS`, `btrfs`, `LVM2_member`, `ext4`, ...",
+          "type": "string"
+        },
+        "label": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "offset_bytes": {
+          "description": "Where the signature's magic is, in bytes from the start of the disk;\n0 when only lsblk's FSTYPE was readable (wipefs needs root).",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "uuid": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind",
+        "offset_bytes"
       ]
     },
     "DiskTarget": {

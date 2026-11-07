@@ -50,6 +50,9 @@ pub fn build_plan(
         wipes_disk: true,
         summary,
         swap_file: None,
+        disk_serial: inventory.disk.serial.clone(),
+        table_id: inventory.table_id.clone(),
+        erased_signatures: inventory.signatures.clone(),
     })
 }
 

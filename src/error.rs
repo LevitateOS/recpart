@@ -39,12 +39,15 @@ pub enum ErrorCode {
     /// A partition the install formats or uses does not start on a 4 KiB
     /// (physical sector) boundary.
     Misaligned = 22,
-    /// The disk is not the one the layout was made for (its table id changed).
+    /// The disk is not the one the layout was made for: its table id changed,
+    /// or it no longer gives the plan `apply --expect` names.
     DiskChanged = 23,
     /// A recorded inventory (`--inventory`) is unreadable, or was given to a real apply.
     InvalidInventory = 24,
     ResizeFailed = 25,
     SwapFailed = 26,
+    /// The confirmed plan (`apply --expect`) is unreadable or not a recpart plan document.
+    InvalidExpectedPlan = 27,
 }
 
 impl ErrorCode {

@@ -134,6 +134,21 @@ pub struct PartitionPlan {
     /// The swap file apply creates, if any.
     #[serde(default)]
     pub swap_file: Option<SwapFilePlan>,
+    /// The serial of the disk the plan was made for (`inspect`'s
+    /// `disk.serial`): with `disk` and `table_id`, it names the disk
+    /// `apply --expect` must still find.
+    #[serde(default)]
+    pub disk_serial: String,
+    /// The partition table id the disk had when the plan was made
+    /// (`inspect`'s `table_id`); `None` when it had no table, or no id.
+    #[serde(default)]
+    pub table_id: Option<String>,
+    /// What apply's `wipefs -a` erases besides the partitions (`inspect`'s
+    /// `signatures`): listed whenever `wipes_disk`, so the confirm page can
+    /// say a LUKS container or a filesystem on the bare disk is lost. Empty
+    /// when the plan keeps the table.
+    #[serde(default)]
+    pub erased_signatures: Vec<DiskSignature>,
 }
 
 /// Partition sizes the caller asked for; unset sizes take the policy default.
@@ -287,6 +302,25 @@ pub struct InspectResult {
     pub partitions: Vec<PartitionInfo>,
     /// Unpartitioned space of at least 1 MiB, aligned to 1 MiB, ordered by start.
     pub free: Vec<FreeGap>,
+    /// Signatures on the whole disk itself, outside any partition: a LUKS
+    /// container, a filesystem or an LVM PV written to the bare disk (the
+    /// partition table's own `gpt`, `PMBR` and `dos` are not listed). Empty
+    /// when there are none, or when neither wipefs nor lsblk could tell.
+    #[serde(default)]
+    pub signatures: Vec<DiskSignature>,
+}
+
+/// A signature on the whole disk, as `wipefs --no-act` reports it.
+#[cfg_attr(feature = "contracts", derive(schemars::JsonSchema, ts_rs::TS))]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DiskSignature {
+    /// wipefs's TYPE: `crypto_LUKS`, `btrfs`, `LVM2_member`, `ext4`, ...
+    pub kind: String,
+    /// Where the signature's magic is, in bytes from the start of the disk;
+    /// 0 when only lsblk's FSTYPE was readable (wipefs needs root).
+    pub offset_bytes: u64,
+    pub uuid: Option<String>,
+    pub label: Option<String>,
 }
 
 #[cfg_attr(feature = "contracts", derive(schemars::JsonSchema, ts_rs::TS))]

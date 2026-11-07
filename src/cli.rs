@@ -4,7 +4,10 @@ use crate::inspect::{inspect_disk, load_inventory, MIB};
 use crate::manual::build_manual_plan;
 use crate::plan::build_plan;
 use crate::preflight::list_disk_inventory;
-use crate::types::{ApplyOptions, InspectResult, InstallMode, LayoutRequest, ManualLayout};
+use crate::types::{
+    ApplyOptions, DiskSignature, InspectResult, InstallMode, LayoutRequest, ManualLayout,
+    PartitionPlan, PLAN_SCHEMA_VERSION,
+};
 use clap::{Parser, Subcommand};
 use serde::Serialize;
 use std::path::PathBuf;
@@ -91,6 +94,13 @@ pub struct ApplyArgs {
     /// Destructive apply confirmation token (must be DESTROY)
     #[arg(long)]
     pub confirm: Option<String>,
+
+    /// The plan the user confirmed (what `plan --json` printed for the same
+    /// arguments): apply refuses (E023) unless the disk gives that exact plan
+    /// again, so a swapped or changed disk is never written. Frontends must
+    /// pass it; scripts may omit it.
+    #[arg(long, value_name = "FILE")]
+    pub expect: Option<PathBuf>,
 }
 
 /// recpart's JSON output; every value it prints is plain data.
@@ -166,7 +176,21 @@ fn run_inspect(args: InspectArgs, json: bool) -> Result<()> {
             mib(gap.size_bytes)
         );
     }
+    if !inventory.signatures.is_empty() {
+        println!("  on the whole disk: {}", describe_signatures(&inventory.signatures));
+    }
     Ok(())
+}
+
+fn describe_signatures(signatures: &[DiskSignature]) -> String {
+    signatures
+        .iter()
+        .map(|s| {
+            let label = s.label.as_deref().map(|l| format!(" {l:?}")).unwrap_or_default();
+            format!("{}{label} at byte {:#x}", s.kind, s.offset_bytes)
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 fn run_plan(args: PlanArgs, json: bool) -> Result<()> {
@@ -179,6 +203,7 @@ fn run_plan(args: PlanArgs, json: bool) -> Result<()> {
         println!("  mode: {}", plan.mode);
         println!("  disk: {}", plan.disk.path.display());
         println!("  size: {} bytes", plan.disk.size_bytes);
+        println!("  serial: {}", plan.disk_serial);
         println!("\nPartitions:");
         for change in &plan.summary {
             println!(
@@ -194,6 +219,9 @@ fn run_plan(args: PlanArgs, json: bool) -> Result<()> {
         }
         if let Some(file) = &plan.swap_file {
             println!("  swap file {} ({} MiB)", file.path, file.size_mb);
+        }
+        if !plan.erased_signatures.is_empty() {
+            println!("\nErased from the whole disk: {}", describe_signatures(&plan.erased_signatures));
         }
         println!("\nGenerated sfdisk script:\n");
         print!("{}", plan.sfdisk_script);
@@ -269,6 +297,115 @@ fn plan_for(args: &PlanArgs) -> Result<crate::types::PartitionPlan> {
     }
 }
 
+/// The plan fields that identify the disk, then those that come from apply's
+/// arguments alone, then the summary of the disk's partitions: a mismatch is
+/// reported at the first of these (then any other field) that differs.
+const IDENTITY_FIELDS: &[&str] = &["disk_serial", "disk", "table_id", "erased_signatures"];
+const ARGUMENT_FIELDS: &[&str] = &["mode", "layout_request", "manual_layout"];
+
+/// `apply --expect`: the plan built from the disk now is the one the user
+/// confirmed, compared as JSON values (whitespace and key order aside).
+fn check_expected_plan(plan: &PartitionPlan, path: &std::path::Path) -> Result<()> {
+    let invalid = |observed: String| {
+        RecpartError::new(
+            ErrorCode::InvalidExpectedPlan,
+            "apply",
+            format!("'{}' is a recpart plan document (`plan --json`)", path.display()),
+            observed,
+            "Pass the file 'recpart plan ... --json' printed for this disk and arguments.",
+        )
+    };
+    let text = std::fs::read_to_string(path).map_err(|err| invalid(err.to_string()))?;
+    let expected: serde_json::Value = serde_json::from_str(&text).map_err(|err| invalid(err.to_string()))?;
+    let Some(expected) = expected.as_object() else {
+        return Err(invalid("the JSON is not an object".to_string()));
+    };
+    match expected.get("schema_version").and_then(|v| v.as_u64()) {
+        Some(version) if version == u64::from(PLAN_SCHEMA_VERSION) => {}
+        other => {
+            return Err(invalid(format!(
+                "schema_version {}, expected {PLAN_SCHEMA_VERSION}",
+                other.map(|v| v.to_string()).unwrap_or_else(|| "missing".to_string())
+            )))
+        }
+    }
+    let fresh = serde_json::to_value(plan).expect("recpart output types serialize to JSON");
+    let fresh = fresh.as_object().expect("a plan serializes to a JSON object");
+
+    let first: Vec<&str> = [IDENTITY_FIELDS, ARGUMENT_FIELDS, &["summary"]].concat();
+    let mut fields = first.clone();
+    let mut rest: Vec<&str> = fresh
+        .keys()
+        .chain(expected.keys())
+        .map(String::as_str)
+        .filter(|k| !first.contains(k))
+        .collect();
+    rest.sort_unstable();
+    rest.dedup();
+    fields.extend(rest);
+    let Some(field) = fields.into_iter().find(|f| fresh.get(*f) != expected.get(*f)) else {
+        return Ok(());
+    };
+
+    let now = fresh.get(field);
+    let then = expected.get(field);
+    let shown = |v: Option<&serde_json::Value>| match v {
+        None | Some(serde_json::Value::Null) => "none".to_string(),
+        Some(serde_json::Value::String(s)) => s.clone(),
+        Some(other) => other.to_string(),
+    };
+    let disk_value = |v: Option<&serde_json::Value>, key: &str| shown(v.and_then(|d| d.get(key)));
+    let observed = match field {
+        "disk_serial" => format!(
+            "the disk's serial is {}, the confirmed plan is for serial {}",
+            shown(now),
+            shown(then)
+        ),
+        "disk" => {
+            let key = ["path", "size_bytes", "logical_sector_bytes", "physical_sector_bytes"]
+                .into_iter()
+                .find(|k| now.and_then(|d| d.get(*k)) != then.and_then(|d| d.get(*k)))
+                .unwrap_or("size_bytes");
+            format!(
+                "the disk's {key} is {}, the confirmed plan has {}",
+                disk_value(now, key),
+                disk_value(then, key)
+            )
+        }
+        "table_id" => format!(
+            "the disk's partition table id is {}, the confirmed plan is for table {}",
+            shown(now),
+            shown(then)
+        ),
+        "erased_signatures" => "the signatures on the whole disk differ from the confirmed plan's".to_string(),
+        "summary" => "the disk's partitions differ from the confirmed plan's summary".to_string(),
+        other => {
+            let scalar = |v: Option<&serde_json::Value>| !matches!(v, Some(serde_json::Value::Object(_) | serde_json::Value::Array(_)));
+            if scalar(now) && scalar(then) {
+                format!("the plan's {other} is {}, the confirmed plan's is {}", shown(now), shown(then))
+            } else {
+                format!("the plan's {other} differs from the confirmed plan's")
+            }
+        }
+    };
+    let remediation = if ARGUMENT_FIELDS.contains(&field) {
+        "Pass apply the --mode, sizes and --layout the confirmed plan was made with, or confirm a new plan."
+    } else {
+        "The disk changed since this plan was made: inspect it again and confirm a new plan."
+    };
+    Err(RecpartError::new(
+        ErrorCode::DiskChanged,
+        "apply",
+        format!(
+            "{} still gives the plan confirmed in '{}'",
+            plan.disk.path.display(),
+            path.display()
+        ),
+        observed,
+        remediation,
+    ))
+}
+
 fn run_apply(args: ApplyArgs, json: bool) -> Result<()> {
     if args.plan.inventory.is_some() && !args.dry_run {
         return Err(RecpartError::new(
@@ -280,6 +417,9 @@ fn run_apply(args: ApplyArgs, json: bool) -> Result<()> {
         ));
     }
     let plan = plan_for(&args.plan)?;
+    if let Some(path) = &args.expect {
+        check_expected_plan(&plan, path)?;
+    }
 
     let result = execute_plan(
         &plan,
