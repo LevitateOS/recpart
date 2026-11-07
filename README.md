@@ -32,8 +32,10 @@ both live ISOs ship it as the `disk-plan` command.
 `inspect --disk <disk>` reports what is on the disk: the table (GPT, MBR or
 none), every partition (number, start, size, type GUID, name, filesystem,
 filesystem label and UUID, used space, mounts, and the sizes recpart could
-resize it to) and the free gaps. Used space of an unmounted filesystem needs
-root (dumpe2fs, `fsck.fat -n`, `ntfsresize --info`).
+resize it to, or why it can't: XFS only grows, swap holds nothing to keep,
+a mounted filesystem isn't resized) and the free gaps. recpart resizes ext2/3/4,
+FAT and NTFS, unmounted. Used space of an unmounted filesystem needs root
+(dumpe2fs, `fsck.fat -n`, `ntfsresize --info`).
 
 `plan` builds the layout one of two ways:
 

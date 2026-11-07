@@ -209,6 +209,14 @@
             "null"
           ]
         },
+        "resize_blocker": {
+          "description": "Why recpart cannot resize it, in words for a person (`XFS can only\ngrow, never shrink`); `None` when it can.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
         "size_bytes": {
           "type": "integer",
           "format": "uint64",

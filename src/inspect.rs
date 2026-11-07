@@ -211,6 +211,7 @@ pub fn finish_inventory(
         } else {
             None
         };
+        part.resize_blocker = resize_blocker(part);
     }
     InspectResult {
         schema_version: INSPECT_SCHEMA_VERSION,
@@ -292,6 +293,34 @@ pub fn align_down(value: u64, to: u64) -> u64 {
 
 /// The smallest size recpart shrinks a filesystem with `used` bytes to:
 /// the used space plus 10% and 64 MiB of headroom, in whole MiB.
+/// Why recpart cannot resize `part`, for a person deciding what to do instead:
+/// what its filesystem allows first (that holds on any system), then whether it
+/// is in use now. `None` when it can.
+fn resize_blocker(part: &PartitionInfo) -> Option<String> {
+    let mut reasons = Vec::new();
+    match part.filesystem.as_deref() {
+        None => reasons.push("it has no filesystem recpart can read".to_string()),
+        Some(fs) if resize_support(Some(fs)).is_none() => reasons.push(match fs {
+            "xfs" => "XFS can only grow, never shrink".to_string(),
+            "swap" => "swap holds nothing to keep: delete it and make a smaller one".to_string(),
+            other => format!("recpart can't resize {other}"),
+        }),
+        _ => {}
+    }
+    if part.mountpoints.iter().any(|m| m == "[SWAP]") {
+        reasons.push("it is in use as swap now".to_string());
+    } else if !part.mountpoints.is_empty() {
+        reasons.push(format!(
+            "it is in use, mounted at {}, and recpart resizes only unmounted filesystems",
+            part.mountpoints.join(", ")
+        ));
+    }
+    if reasons.is_empty() && part.used_bytes.is_none() {
+        reasons.push("recpart couldn't read how much of it is in use (that needs root)".to_string());
+    }
+    (!reasons.is_empty()).then(|| reasons.join("; "))
+}
+
 pub fn min_shrink_bytes(used: u64) -> u64 {
     align_up(used + used / 10 + 64 * MIB, MIB)
 }
@@ -363,6 +392,7 @@ fn partition_info(
         mountpoints,
         min_size_bytes: None,
         max_size_bytes: None,
+        resize_blocker: None,
     }
 }
 

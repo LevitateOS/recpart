@@ -317,6 +317,10 @@ pub struct PartitionInfo {
     /// recpart cannot resize this filesystem, or cannot read its used space.
     pub min_size_bytes: Option<u64>,
     pub max_size_bytes: Option<u64>,
+    /// Why recpart cannot resize it, in words for a person (`XFS can only
+    /// grow, never shrink`); `None` when it can.
+    #[serde(default)]
+    pub resize_blocker: Option<String>,
 }
 
 #[cfg_attr(feature = "contracts", derive(schemars::JsonSchema, ts_rs::TS))]
