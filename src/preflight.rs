@@ -128,7 +128,7 @@ fn lsblk_disks(device: Option<&Path>) -> Result<Vec<LsblkDisk>> {
     Ok(parsed.blockdevices)
 }
 
-fn tool_in_path(tool: &str) -> bool {
+pub(crate) fn tool_in_path(tool: &str) -> bool {
     let Some(paths) = env::var_os("PATH") else {
         return false;
     };
