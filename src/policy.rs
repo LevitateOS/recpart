@@ -8,6 +8,25 @@ pub const DEFAULT_EFI_SIZE_MB: u32 = 1024;
 pub const DEFAULT_AB_ROOT_SIZE_MB: u32 = 20 * 1024;
 pub const DEFAULT_AB_MIN_STATE_MB: u32 = 4 * 1024;
 pub const DEFAULT_MUTABLE_MIN_ROOT_MB: u32 = 8 * 1024;
+/// The smallest A/B root slot a manual layout may give.
+pub const MIN_AB_ROOT_MB: u32 = 8 * 1024;
+/// Room one slot's kernel and initramfs take on the EFI partition.
+pub const SLOT_BOOT_FILES_MB: u64 = 128;
+/// Room systemd-boot and its loader entries take on the EFI partition.
+pub const BOOTLOADER_MB: u64 = 8;
+/// The smallest EFI partition recpart formats: FAT32 on 4 KiB-sector disks needs 260 MiB.
+pub const MIN_NEW_EFI_MB: u64 = 260;
+/// The smallest swap partition or file.
+pub const MIN_SWAP_MB: u64 = 64;
+
+/// Free space the EFI partition needs for the mode's kernels and the boot loader.
+pub fn efi_boot_files_mb(mode: InstallMode) -> u64 {
+    let slots = match mode {
+        InstallMode::Ab => 2,
+        InstallMode::Mutable => 1,
+    };
+    slots * SLOT_BOOT_FILES_MB + BOOTLOADER_MB
+}
 
 pub fn policy_defaults(mode: InstallMode) -> ResolvedLayout {
     match mode {

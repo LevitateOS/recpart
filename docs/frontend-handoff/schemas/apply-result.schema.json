@@ -6,6 +6,11 @@
     "disk": {
       "$ref": "#/$defs/DiskTarget"
     },
+    "disk_checks_skipped": {
+      "description": "The dry run planned from a recorded inventory (`--inventory`), so\nthe live-disk checks behind `warnings` did not run.",
+      "type": "boolean",
+      "default": false
+    },
     "dry_run": {
       "type": "boolean"
     },
@@ -44,6 +49,14 @@
         "$ref": "#/$defs/CommandRecord"
       }
     },
+    "summary": {
+      "description": "The plan's per-partition summary (as in the plan).",
+      "type": "array",
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/PartitionChange"
+      }
+    },
     "warnings": {
       "description": "In a dry run, the reasons a real apply would refuse this disk; empty when it would proceed.",
       "type": "array",
@@ -66,6 +79,36 @@
     "warnings"
   ],
   "$defs": {
+    "ChangeKind": {
+      "description": "What apply does to one partition.",
+      "oneOf": [
+        {
+          "description": "Deleted (or lost with the old table); its data is gone.",
+          "type": "string",
+          "const": "erased"
+        },
+        {
+          "description": "New, formatted.",
+          "type": "string",
+          "const": "created"
+        },
+        {
+          "description": "Grown or shrunk with its filesystem; the data stays.",
+          "type": "string",
+          "const": "resized"
+        },
+        {
+          "description": "A new filesystem in place; its data is gone.",
+          "type": "string",
+          "const": "formatted"
+        },
+        {
+          "description": "Left as it is.",
+          "type": "string",
+          "const": "untouched"
+        }
+      ]
+    },
     "CommandRecord": {
       "type": "object",
       "properties": {
@@ -145,11 +188,12 @@
       ]
     },
     "Filesystem": {
-      "description": "The filesystems recpart creates.",
+      "description": "The filesystems recpart creates. Each serializes as its blkid name.",
       "type": "string",
       "enum": [
         "vfat",
-        "ext4"
+        "ext4",
+        "swap"
       ]
     },
     "HandoffPayload": {
@@ -174,6 +218,14 @@
           "type": "integer",
           "format": "uint32",
           "minimum": 0
+        },
+        "swaps": {
+          "description": "Swap devices and files apply activated (`swapon`), as recfstab will\nfind them.",
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "string"
+          }
         }
       },
       "required": [
@@ -294,6 +346,97 @@
         "device"
       ]
     },
+    "PartitionChange": {
+      "type": "object",
+      "properties": {
+        "after": {
+          "description": "The partition after apply (`None` when it is erased).",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PartitionState"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "before": {
+          "description": "The partition on the disk now (`None` when it is created).",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PartitionState"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "change": {
+          "$ref": "#/$defs/ChangeKind"
+        },
+        "device": {
+          "type": "string"
+        },
+        "mountpoint": {
+          "description": "Where the installed system mounts it (`None`: not mounted).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "number": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "role": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Role"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "number",
+        "device",
+        "change"
+      ]
+    },
+    "PartitionState": {
+      "type": "object",
+      "properties": {
+        "filesystem": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "fs_label": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "size_bytes": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "start_bytes": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "start_bytes",
+        "size_bytes"
+      ]
+    },
     "PartitionTemplate": {
       "type": "object",
       "properties": {
@@ -388,6 +531,51 @@
       "required": [
         "mode",
         "efi_size_mb"
+      ]
+    },
+    "Role": {
+      "description": "What the installed system uses a partition for. Each role has its mount\npoint; `other` takes the layout's `mountpoint`.",
+      "oneOf": [
+        {
+          "description": "The EFI system partition, mounted at /boot (vfat).",
+          "type": "string",
+          "const": "efi"
+        },
+        {
+          "description": "The one root of a mutable install, at / (ext4).",
+          "type": "string",
+          "const": "root"
+        },
+        {
+          "description": "A/B root slot A, installed now and mounted at / (ext4).",
+          "type": "string",
+          "const": "root_a"
+        },
+        {
+          "description": "A/B root slot B, left unmounted for updates (ext4).",
+          "type": "string",
+          "const": "root_b"
+        },
+        {
+          "description": "The persistent /var: the A/B state partition, or a mutable install's own /var (ext4).",
+          "type": "string",
+          "const": "state"
+        },
+        {
+          "description": "/home (ext4).",
+          "type": "string",
+          "const": "home"
+        },
+        {
+          "description": "A swap partition, activated with swapon.",
+          "type": "string",
+          "const": "swap"
+        },
+        {
+          "description": "Mounted at the action's `mountpoint`.",
+          "type": "string",
+          "const": "other"
+        }
       ]
     }
   }

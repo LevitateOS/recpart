@@ -7,6 +7,7 @@ pub const APPLY_SCHEMA_VERSION: u32 = 2;
 pub const HANDOFF_SCHEMA_VERSION: u32 = 2;
 pub const ERROR_SCHEMA_VERSION: u32 = 1;
 pub const DISK_LIST_SCHEMA_VERSION: u32 = 1;
+pub const INSPECT_SCHEMA_VERSION: u32 = 1;
 
 /// The `--confirm` value destructive apply requires.
 pub const CONFIRM_TOKEN: &str = "DESTROY";
@@ -62,13 +63,34 @@ pub struct DiskListResult {
     pub disks: Vec<DiskInventory>,
 }
 
-/// The filesystems recpart creates.
+/// The filesystems recpart creates. Each serializes as its blkid name.
 #[cfg_attr(feature = "contracts", derive(schemars::JsonSchema, ts_rs::TS))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Filesystem {
     Vfat,
     Ext4,
+    Swap,
+}
+
+impl Filesystem {
+    /// The name blkid and lsblk report for it.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Filesystem::Vfat => "vfat",
+            Filesystem::Ext4 => "ext4",
+            Filesystem::Swap => "swap",
+        }
+    }
+
+    pub fn from_blkid(name: &str) -> Option<Self> {
+        match name {
+            "vfat" => Some(Filesystem::Vfat),
+            "ext4" => Some(Filesystem::Ext4),
+            "swap" => Some(Filesystem::Swap),
+            _ => None,
+        }
+    }
 }
 
 #[cfg_attr(feature = "contracts", derive(schemars::JsonSchema, ts_rs::TS))]
@@ -93,8 +115,25 @@ pub struct PartitionPlan {
     pub layout_request: LayoutRequest,
     pub resolved_layout: ResolvedLayout,
     pub disk: DiskTarget,
+    /// The partitions the installed system uses, with their filesystem and
+    /// mount point; a manual layout's other partitions are only in `summary`.
     pub partitions: Vec<PartitionTemplate>,
     pub sfdisk_script: String,
+    /// The explicit layout (`--layout`) this plan came from; `None` for the
+    /// `ab`/`mutable` templates.
+    #[serde(default)]
+    pub manual_layout: Option<ManualLayout>,
+    /// Apply erases the whole disk (`wipefs -a`) before writing the new
+    /// table: always for a template, and for a manual layout with `new_table`.
+    #[serde(default)]
+    pub wipes_disk: bool,
+    /// What happens to every partition, on the disk now and after apply, in
+    /// partition-number order: the confirm page's list.
+    #[serde(default)]
+    pub summary: Vec<PartitionChange>,
+    /// The swap file apply creates, if any.
+    #[serde(default)]
+    pub swap_file: Option<SwapFilePlan>,
 }
 
 /// Partition sizes the caller asked for; unset sizes take the policy default.
@@ -133,6 +172,8 @@ pub struct ResolvedLayout {
 #[derive(Debug, Clone)]
 pub struct ApplyOptions {
     pub dry_run: bool,
+    /// The plan came from a recorded inventory: a dry run skips the live-disk checks.
+    pub skip_disk_checks: bool,
     pub confirm_token: Option<String>,
     pub mount_root: PathBuf,
 }
@@ -163,6 +204,10 @@ pub struct HandoffPayload {
     pub install_target: String,
     pub mount_map: Vec<MountMapping>,
     pub mode_context: ModeContext,
+    /// Swap devices and files apply activated (`swapon`), as recfstab will
+    /// find them.
+    #[serde(default)]
+    pub swaps: Vec<String>,
 }
 
 #[cfg_attr(feature = "contracts", derive(schemars::JsonSchema, ts_rs::TS))]
@@ -193,6 +238,13 @@ pub struct ApplyResult {
     pub handoff: HandoffPayload,
     /// In a dry run, the reasons a real apply would refuse this disk; empty when it would proceed.
     pub warnings: Vec<String>,
+    /// The plan's per-partition summary (as in the plan).
+    #[serde(default)]
+    pub summary: Vec<PartitionChange>,
+    /// The dry run planned from a recorded inventory (`--inventory`), so
+    /// the live-disk checks behind `warnings` did not run.
+    #[serde(default)]
+    pub disk_checks_skipped: bool,
 }
 
 #[cfg_attr(feature = "contracts", derive(schemars::JsonSchema, ts_rs::TS))]
@@ -204,4 +256,288 @@ pub struct ErrorPayload {
     pub expectation: String,
     pub observed: String,
     pub remediation: String,
+}
+
+/// The partition table on a disk.
+#[cfg_attr(feature = "contracts", derive(schemars::JsonSchema, ts_rs::TS))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TableType {
+    Gpt,
+    /// An MBR (DOS) table.
+    Mbr,
+    /// No partition table.
+    None,
+}
+
+/// `recpart inspect`: one disk's partition table, its partitions and the free gaps.
+#[cfg_attr(feature = "contracts", derive(schemars::JsonSchema, ts_rs::TS))]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct InspectResult {
+    pub schema_version: u32,
+    pub disk: DiskInventory,
+    pub table: TableType,
+    /// The table's identifier (GPT disk GUID, or MBR disk id).
+    pub table_id: Option<String>,
+    /// The space partitions may use: after the GPT header (or the first MiB)
+    /// and before the backup GPT, in bytes from the start of the disk.
+    pub usable_start_bytes: u64,
+    pub usable_end_bytes: u64,
+    /// Ordered by start.
+    pub partitions: Vec<PartitionInfo>,
+    /// Unpartitioned space of at least 1 MiB, aligned to 1 MiB, ordered by start.
+    pub free: Vec<FreeGap>,
+}
+
+#[cfg_attr(feature = "contracts", derive(schemars::JsonSchema, ts_rs::TS))]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PartitionInfo {
+    pub number: u32,
+    pub device: String,
+    pub start_bytes: u64,
+    pub size_bytes: u64,
+    /// GPT type GUID (upper case), or the MBR type byte (`0x83`).
+    pub type_guid: String,
+    /// The GPT partition name.
+    pub label: Option<String>,
+    pub part_uuid: Option<String>,
+    /// GPT attributes in sfdisk's notation (`RequiredPartition GUID:63`).
+    pub attrs: Option<String>,
+    /// The filesystem blkid found (`ext4`, `vfat`, `ntfs`, `swap`, ...).
+    pub filesystem: Option<String>,
+    pub fs_label: Option<String>,
+    pub fs_uuid: Option<String>,
+    /// Space in use; `None` when it could not be read (an unmounted
+    /// filesystem needs root, or recpart has no probe for it).
+    pub used_bytes: Option<u64>,
+    /// Where it is mounted now (empty when it is not).
+    pub mountpoints: Vec<String>,
+    /// The smallest and largest size recpart would resize it to, keeping its
+    /// start (the largest takes the free gap right after it); `None` when
+    /// recpart cannot resize this filesystem, or cannot read its used space.
+    pub min_size_bytes: Option<u64>,
+    pub max_size_bytes: Option<u64>,
+}
+
+#[cfg_attr(feature = "contracts", derive(schemars::JsonSchema, ts_rs::TS))]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FreeGap {
+    pub start_bytes: u64,
+    pub size_bytes: u64,
+}
+
+/// What the installed system uses a partition for. Each role has its mount
+/// point; `other` takes the layout's `mountpoint`.
+#[cfg_attr(feature = "contracts", derive(schemars::JsonSchema, ts_rs::TS))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, clap::ValueEnum)]
+#[serde(rename_all = "snake_case")]
+pub enum Role {
+    /// The EFI system partition, mounted at /boot (vfat).
+    Efi,
+    /// The one root of a mutable install, at / (ext4).
+    Root,
+    /// A/B root slot A, installed now and mounted at / (ext4).
+    RootA,
+    /// A/B root slot B, left unmounted for updates (ext4).
+    RootB,
+    /// The persistent /var: the A/B state partition, or a mutable install's own /var (ext4).
+    State,
+    /// /home (ext4).
+    Home,
+    /// A swap partition, activated with swapon.
+    Swap,
+    /// Mounted at the action's `mountpoint`.
+    Other,
+}
+
+impl LayoutAction {
+    /// The fields each action takes (`deny_unknown_fields` for an internally
+    /// tagged enum, checked by the layout reader).
+    pub fn fields(action: &str) -> Option<&'static [&'static str]> {
+        Some(match action {
+            "keep" => &["action", "partition", "role", "mountpoint"],
+            "delete" => &["action", "partition"],
+            "create" => &["action", "size_mb", "start_mb", "filesystem", "label", "role", "mountpoint"],
+            "resize" => &["action", "partition", "size_mb", "role", "mountpoint"],
+            "format" => &["action", "partition", "filesystem", "label", "role", "mountpoint"],
+            _ => return None,
+        })
+    }
+}
+
+impl Role {
+    /// The template partition name (as `PartitionTemplate::name`).
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Role::Efi => "efi",
+            Role::Root => "root",
+            Role::RootA => "root_a",
+            Role::RootB => "root_b",
+            Role::State => "state",
+            Role::Home => "home",
+            Role::Swap => "swap",
+            Role::Other => "other",
+        }
+    }
+
+    pub fn from_template_name(name: &str) -> Option<Role> {
+        [
+            Role::Efi,
+            Role::Root,
+            Role::RootA,
+            Role::RootB,
+            Role::State,
+            Role::Home,
+            Role::Swap,
+            Role::Other,
+        ]
+        .into_iter()
+        .find(|role| role.as_str() == name)
+    }
+}
+
+/// An explicit layout: what to do with each partition. Partitions no action
+/// names are kept untouched. Sizes are MiB (1024 * 1024 bytes).
+#[cfg_attr(feature = "contracts", derive(schemars::JsonSchema, ts_rs::TS))]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+pub struct ManualLayout {
+    /// Replace the partition table with an empty GPT one, erasing every
+    /// partition, before the `create` actions. Only `create` may follow.
+    #[serde(default)]
+    pub new_table: bool,
+    /// When set, the disk's table must still have this id (`inspect`'s
+    /// `table_id`), so a plan made for one disk never edits another.
+    #[serde(default)]
+    pub table_id: Option<String>,
+    pub actions: Vec<LayoutAction>,
+    /// A swap file in the installed system, in place of (or as well as) a
+    /// swap partition.
+    #[serde(default)]
+    pub swap_file: Option<SwapFileRequest>,
+}
+
+/// One action of a manual layout. `partition` is an existing partition's
+/// number from `inspect`; each partition takes at most one action. `role`
+/// and `mountpoint` (for `other`) say how the installed system uses it.
+#[cfg_attr(feature = "contracts", derive(schemars::JsonSchema, ts_rs::TS))]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "action", rename_all = "snake_case")]
+pub enum LayoutAction {
+    /// Leave the partition and its data as they are (an existing EFI
+    /// partition, /home, or another system's partition).
+    Keep {
+        partition: u32,
+        #[serde(default)]
+        role: Option<Role>,
+        #[serde(default)]
+        mountpoint: Option<String>,
+    },
+    /// Remove the partition; its data is lost.
+    Delete { partition: u32 },
+    /// A new partition in free space, formatted. `size_mb` unset takes the
+    /// rest of the free gap; `start_mb` picks the gap (first fit when unset).
+    /// `filesystem` defaults from the role (ext4 without one).
+    Create {
+        #[serde(default)]
+        size_mb: Option<u64>,
+        #[serde(default)]
+        start_mb: Option<u64>,
+        #[serde(default)]
+        filesystem: Option<Filesystem>,
+        #[serde(default)]
+        label: Option<String>,
+        #[serde(default)]
+        role: Option<Role>,
+        #[serde(default)]
+        mountpoint: Option<String>,
+    },
+    /// Grow or shrink the partition together with its filesystem, keeping
+    /// its start and data. `size_mb` unset grows it into the free gap after it.
+    Resize {
+        partition: u32,
+        #[serde(default)]
+        size_mb: Option<u64>,
+        #[serde(default)]
+        role: Option<Role>,
+        #[serde(default)]
+        mountpoint: Option<String>,
+    },
+    /// Make a new filesystem on the partition, in place; its data is lost.
+    Format {
+        partition: u32,
+        filesystem: Filesystem,
+        #[serde(default)]
+        label: Option<String>,
+        #[serde(default)]
+        role: Option<Role>,
+        #[serde(default)]
+        mountpoint: Option<String>,
+    },
+}
+
+/// Where a swap file goes: the root or the /var filesystem.
+#[cfg_attr(feature = "contracts", derive(schemars::JsonSchema, ts_rs::TS))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SwapFileLocation {
+    Root,
+    Var,
+}
+
+#[cfg_attr(feature = "contracts", derive(schemars::JsonSchema, ts_rs::TS))]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SwapFileRequest {
+    pub size_mb: u64,
+    pub location: SwapFileLocation,
+}
+
+#[cfg_attr(feature = "contracts", derive(schemars::JsonSchema, ts_rs::TS))]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SwapFilePlan {
+    /// The file's path in the installed system (`/swapfile`, `/var/swapfile`).
+    pub path: String,
+    pub size_mb: u64,
+}
+
+/// What apply does to one partition.
+#[cfg_attr(feature = "contracts", derive(schemars::JsonSchema, ts_rs::TS))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ChangeKind {
+    /// Deleted (or lost with the old table); its data is gone.
+    Erased,
+    /// New, formatted.
+    Created,
+    /// Grown or shrunk with its filesystem; the data stays.
+    Resized,
+    /// A new filesystem in place; its data is gone.
+    Formatted,
+    /// Left as it is.
+    Untouched,
+}
+
+#[cfg_attr(feature = "contracts", derive(schemars::JsonSchema, ts_rs::TS))]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PartitionState {
+    pub start_bytes: u64,
+    pub size_bytes: u64,
+    pub filesystem: Option<String>,
+    pub fs_label: Option<String>,
+}
+
+#[cfg_attr(feature = "contracts", derive(schemars::JsonSchema, ts_rs::TS))]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PartitionChange {
+    pub number: u32,
+    pub device: String,
+    pub change: ChangeKind,
+    /// The partition on the disk now (`None` when it is created).
+    pub before: Option<PartitionState>,
+    /// The partition after apply (`None` when it is erased).
+    pub after: Option<PartitionState>,
+    pub role: Option<Role>,
+    /// Where the installed system mounts it (`None`: not mounted).
+    pub mountpoint: Option<String>,
 }

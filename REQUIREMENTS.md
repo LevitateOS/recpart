@@ -2,7 +2,7 @@
 
 **Version:** 0.1.0  
 **Status:** Draft  
-**Last Updated:** 2026-02-21
+**Last Updated:** 2026-11-07
 
 This document defines the requirements for `recpart`: a partitioning and
 mount-preparation wizard for LevitateOS install workflows. `recpart` is
@@ -148,6 +148,41 @@ partition semantics suitable for mutable installations.
 **REQ-MODE-030**: Plans MUST assign stable, mode-aware partition labels that
 allow downstream tooling to discover intended mount targets deterministically.
 
+### 5.5 Disk Inventory
+
+**REQ-MODE-040**: `recpart inspect` MUST report the disk's table type (GPT,
+MBR, none), every partition (number, start, size, type GUID, name, filesystem,
+filesystem label and UUID, used space where readable, mount points) and the
+free gaps.
+
+### 5.6 Explicit Layouts
+
+**REQ-MODE-050**: Next to the templates, `plan --layout` MUST accept a list of
+actions on the inventoried partitions (keep, delete, create, resize, format)
+with a role for each partition the installed system uses (EFI, root, root A,
+root B, state, home, swap, other at a mount point), and MUST leave every
+partition no action names untouched.
+
+**REQ-MODE-051**: The plan MUST check the layout against the mode (`ab`: EFI,
+two root slots of equal size and state; `mutable`: EFI and root), the minimum
+sizes, 4 KiB alignment, mount points used once, and that the EFI partition is
+FAT with room for the mode's kernels. Each refusal MUST carry its code and a
+remediation.
+
+**REQ-MODE-052**: recpart MUST resize only filesystems it can resize safely
+(ext4 offline, FAT, NTFS) and MUST refuse a shrink below the used space or
+with the used space unknown.
+
+**REQ-MODE-053**: An existing EFI partition MAY be reused (dual boot); it MUST
+be mounted without being formatted.
+
+**REQ-MODE-054**: Swap MAY be a partition or a swap file (on var, or on root in
+`mutable`); apply MUST activate it so recfstab writes its entry.
+
+**REQ-MODE-055**: Every plan MUST include a per-partition summary (erased,
+created, resized, formatted, untouched, with the state before and after) for
+the confirmation screen.
+
 ---
 
 ## 6. Execution and Safety Requirements
@@ -167,9 +202,12 @@ confirmation.
 
 **REQ-EXEC-011**: Apply MUST execute in deterministic order:
 
-1. Partition table write
-2. Filesystem creation/labeling
-3. Mount topology creation
+1. Filesystem shrinks
+2. Partition table write
+3. Filesystem grows
+4. Filesystem creation/labeling
+5. Mount topology creation
+6. Swap activation
 
 **REQ-EXEC-012**: If any step fails, `recpart` MUST stop and print recovery
 guidance.
@@ -187,6 +225,8 @@ prints intended changes without modifying disk state.
 
 **REQ-CLI-001**: `recpart` MUST provide:
 
+- `recpart list-disks`
+- `recpart inspect`
 - `recpart plan`
 - `recpart apply`
 
@@ -260,5 +300,10 @@ Unit tests are prohibited. Choose focused validation for the behavior being chan
 - `cargo check -p recpart` for compilation.
 - `cargo test -p recpart --test integration_cli` for the actual CLI and JSON contract.
 - `tests/loop_disk.rs` (root) for plan, dry-run and apply on a loop device.
+- `plan`/`apply --dry-run` with `--inventory` against the fixture disks in
+  `tui/apps/install/disk-plan/fixtures` (`record.sh` re-records them): manual
+  layouts, a shrink with dual boot, and each layout refusal. A generated
+  `sfdisk_script` can be checked by feeding it to `sfdisk` on a sparse image
+  file, which needs no root.
 
 Use `docs/use-cases.md` for example workflows. No traceability matrix or minimum coverage gate is required during development.

@@ -3,12 +3,12 @@ use crate::types::{
     HandoffPayload, InstallMode, ModeContext, MountMapping, PartitionPlan, HANDOFF_SCHEMA_VERSION,
 };
 
-pub fn build_handoff(plan: &PartitionPlan, mounted: Vec<MountMapping>) -> HandoffPayload {
+pub fn build_handoff(plan: &PartitionPlan, mounted: Vec<MountMapping>, swaps: Vec<String>) -> HandoffPayload {
     // The install target is where the partition planned for "/" is mounted.
     let root = plan.partitions.iter().find(|p| p.mountpoint == "/");
     let install_target = root
         .and_then(|p| {
-            let device = partition_device(&plan.disk.path, p.index);
+            let device = partition_device(&plan.disk.path, p.index.into());
             mounted.iter().find(|m| m.device == device)
         })
         .map(|m| m.path.clone())
@@ -17,7 +17,7 @@ pub fn build_handoff(plan: &PartitionPlan, mounted: Vec<MountMapping>) -> Handof
     let mode_context = match plan.mode {
         InstallMode::Ab => {
             let slot = |name: &str| plan.partitions.iter().find(|p| p.name == name);
-            let device_of = |name: &str| slot(name).map(|p| partition_device(&plan.disk.path, p.index));
+            let device_of = |name: &str| slot(name).map(|p| partition_device(&plan.disk.path, p.index.into()));
             // The slot installed now is the one mounted at "/"; the other is
             // left unmounted for later updates.
             let target_slot = |name: &str| slot(name).is_some_and(|p| p.mountpoint == "/");
@@ -47,5 +47,6 @@ pub fn build_handoff(plan: &PartitionPlan, mounted: Vec<MountMapping>) -> Handof
         install_target,
         mount_map: mounted,
         mode_context,
+        swaps,
     }
 }

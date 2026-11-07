@@ -17,6 +17,34 @@ pub enum ErrorCode {
     NotRoot = 11,
     Internal = 12,
     InvalidMountRoot = 13,
+    /// The manual layout is malformed or contradicts the disk: an unknown or
+    /// twice-named partition, a role on the wrong filesystem, an MBR edit.
+    InvalidLayout = 14,
+    /// A created or grown partition does not fit in the free space.
+    LayoutDoesNotFit = 15,
+    /// The roles do not make the mode's layout (`ab`: EFI, two equal root
+    /// slots and state; `mutable`: EFI and root).
+    ModeRequirements = 16,
+    /// Two partitions (or roles) would mount at the same place.
+    DuplicateMountpoint = 17,
+    /// A partition is smaller than its role's minimum.
+    PartitionTooSmall = 18,
+    /// The EFI partition is not FAT, not an EFI system partition, or has no
+    /// room for the slots' kernels.
+    EfiUnsuitable = 19,
+    /// recpart cannot resize this partition safely (its filesystem, or it is mounted).
+    ResizeUnsupported = 20,
+    /// A shrink below the space in use, or with the used space unreadable.
+    ShrinkBelowUsed = 21,
+    /// A partition the install formats or uses does not start on a 4 KiB
+    /// (physical sector) boundary.
+    Misaligned = 22,
+    /// The disk is not the one the layout was made for (its table id changed).
+    DiskChanged = 23,
+    /// A recorded inventory (`--inventory`) is unreadable, or was given to a real apply.
+    InvalidInventory = 24,
+    ResizeFailed = 25,
+    SwapFailed = 26,
 }
 
 impl ErrorCode {

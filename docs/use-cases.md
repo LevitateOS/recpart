@@ -15,6 +15,10 @@ This document defines end-user and automation scenarios for `recpart` backend us
 | UC-007 | Reject protected mount root | any | `recpart apply ... --dry-run --mount-root /` | Non-zero result with mount safety error. |
 | UC-008 | Require explicit confirmation for destructive apply | any | `recpart apply ...` (without `--confirm DESTROY`) | Non-zero result with `E004`. |
 | UC-009 | Preserve deterministic plan output | any | repeat same `plan` command | byte-identical plan JSON/script output |
+| UC-010 | Read a disk's partitions and free space | N/A | `recpart inspect --disk <disk> --json` | Table type, partitions with filesystem/used space/mounts, free gaps. |
+| UC-011 | Manual layout on an empty disk | any | `recpart plan --disk <disk> --mode ab --layout layout.json --json` | sfdisk script and summary of the requested partitions; swap file if asked. |
+| UC-012 | Shrink Windows and dual boot | `ab` | `recpart apply --dry-run --disk <disk> --layout dualboot.json --json` | ntfsresize before the table write, EFI partition kept and mounted, other partitions untouched. |
+| UC-013 | Refuse an unsafe layout | any | `recpart plan ... --layout <refused layout>` | Non-zero exit with the refusal's code (E014-E023) and remediation. |
 
 ## Checks
 
@@ -26,7 +30,13 @@ sudo target/debug/deps/loop_disk-<hash> --include-ignored   # UC-001..UC-003 on 
 
 `tests/loop_disk.rs` plans, dry-runs and applies the A/B layout on a sparse
 loop device and checks labels, mounts and the handoff; no real disk is
-touched.
+touched. UC-010 to UC-013 run unprivileged against recorded fixture disks:
+
+```bash
+cd tui/apps/install/disk-plan/fixtures
+recpart plan --disk /dev/vdy --mode ab --inventory inspect-vdy.json --layout layouts/dualboot.json
+RECPART=../../../../../target/debug/recpart ./record.sh   # re-record every fixture document
+```
 
 ## Notes
 

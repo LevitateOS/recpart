@@ -87,7 +87,7 @@ impl LsblkDisk {
 }
 
 /// Run lsblk and return its stdout; `what` names the query in errors.
-fn lsblk(args: &[&str], what: &str) -> Result<String> {
+pub(crate) fn lsblk(args: &[&str], what: &str) -> Result<String> {
     let fail = |observed: String| {
         RecpartError::new(
             ErrorCode::InvalidTargetDisk,
@@ -379,7 +379,7 @@ pub fn ensure_disk_writable(path: &Path) -> Result<()> {
 }
 
 /// Describe the whole disk at `path` (a partition is refused).
-fn query_disk(path: &Path) -> Result<DiskInventory> {
+pub(crate) fn query_disk(path: &Path) -> Result<DiskInventory> {
     let canonical = resolve_disk_path(path)?;
     ensure_block_device(&canonical)?;
     let disk = lsblk_disks(Some(&canonical))?

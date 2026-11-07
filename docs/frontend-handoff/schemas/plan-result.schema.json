@@ -9,10 +9,23 @@
     "layout_request": {
       "$ref": "#/$defs/LayoutRequest"
     },
+    "manual_layout": {
+      "description": "The explicit layout (`--layout`) this plan came from; `None` for the\n`ab`/`mutable` templates.",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ManualLayout"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
     "mode": {
       "$ref": "#/$defs/InstallMode"
     },
     "partitions": {
+      "description": "The partitions the installed system uses, with their filesystem and\nmount point; a manual layout's other partitions are only in `summary`.",
       "type": "array",
       "items": {
         "$ref": "#/$defs/PartitionTemplate"
@@ -28,6 +41,31 @@
     },
     "sfdisk_script": {
       "type": "string"
+    },
+    "summary": {
+      "description": "What happens to every partition, on the disk now and after apply, in\npartition-number order: the confirm page's list.",
+      "type": "array",
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/PartitionChange"
+      }
+    },
+    "swap_file": {
+      "description": "The swap file apply creates, if any.",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/SwapFilePlan"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "wipes_disk": {
+      "description": "Apply erases the whole disk (`wipefs -a`) before writing the new\ntable: always for a template, and for a manual layout with `new_table`.",
+      "type": "boolean",
+      "default": false
     }
   },
   "required": [
@@ -40,6 +78,36 @@
     "sfdisk_script"
   ],
   "$defs": {
+    "ChangeKind": {
+      "description": "What apply does to one partition.",
+      "oneOf": [
+        {
+          "description": "Deleted (or lost with the old table); its data is gone.",
+          "type": "string",
+          "const": "erased"
+        },
+        {
+          "description": "New, formatted.",
+          "type": "string",
+          "const": "created"
+        },
+        {
+          "description": "Grown or shrunk with its filesystem; the data stays.",
+          "type": "string",
+          "const": "resized"
+        },
+        {
+          "description": "A new filesystem in place; its data is gone.",
+          "type": "string",
+          "const": "formatted"
+        },
+        {
+          "description": "Left as it is.",
+          "type": "string",
+          "const": "untouched"
+        }
+      ]
+    },
     "DiskTarget": {
       "type": "object",
       "properties": {
@@ -70,11 +138,12 @@
       ]
     },
     "Filesystem": {
-      "description": "The filesystems recpart creates.",
+      "description": "The filesystems recpart creates. Each serializes as its blkid name.",
       "type": "string",
       "enum": [
         "vfat",
-        "ext4"
+        "ext4",
+        "swap"
       ]
     },
     "InstallMode": {
@@ -88,6 +157,228 @@
           "description": "Classic layout with one mutable root.",
           "type": "string",
           "const": "mutable"
+        }
+      ]
+    },
+    "LayoutAction": {
+      "description": "One action of a manual layout. `partition` is an existing partition's\nnumber from `inspect`; each partition takes at most one action. `role`\nand `mountpoint` (for `other`) say how the installed system uses it.",
+      "oneOf": [
+        {
+          "description": "Leave the partition and its data as they are (an existing EFI\npartition, /home, or another system's partition).",
+          "type": "object",
+          "properties": {
+            "action": {
+              "type": "string",
+              "const": "keep"
+            },
+            "mountpoint": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "default": null
+            },
+            "partition": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "role": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Role"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            }
+          },
+          "required": [
+            "action",
+            "partition"
+          ]
+        },
+        {
+          "description": "Remove the partition; its data is lost.",
+          "type": "object",
+          "properties": {
+            "action": {
+              "type": "string",
+              "const": "delete"
+            },
+            "partition": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "action",
+            "partition"
+          ]
+        },
+        {
+          "description": "A new partition in free space, formatted. `size_mb` unset takes the\nrest of the free gap; `start_mb` picks the gap (first fit when unset).\n`filesystem` defaults from the role (ext4 without one).",
+          "type": "object",
+          "properties": {
+            "action": {
+              "type": "string",
+              "const": "create"
+            },
+            "filesystem": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Filesystem"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "label": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "default": null
+            },
+            "mountpoint": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "default": null
+            },
+            "role": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Role"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "size_mb": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint64",
+              "default": null,
+              "minimum": 0
+            },
+            "start_mb": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint64",
+              "default": null,
+              "minimum": 0
+            }
+          },
+          "required": [
+            "action"
+          ]
+        },
+        {
+          "description": "Grow or shrink the partition together with its filesystem, keeping\nits start and data. `size_mb` unset grows it into the free gap after it.",
+          "type": "object",
+          "properties": {
+            "action": {
+              "type": "string",
+              "const": "resize"
+            },
+            "mountpoint": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "default": null
+            },
+            "partition": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "role": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Role"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "size_mb": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint64",
+              "default": null,
+              "minimum": 0
+            }
+          },
+          "required": [
+            "action",
+            "partition"
+          ]
+        },
+        {
+          "description": "Make a new filesystem on the partition, in place; its data is lost.",
+          "type": "object",
+          "properties": {
+            "action": {
+              "type": "string",
+              "const": "format"
+            },
+            "filesystem": {
+              "$ref": "#/$defs/Filesystem"
+            },
+            "label": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "default": null
+            },
+            "mountpoint": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "default": null
+            },
+            "partition": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "role": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Role"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            }
+          },
+          "required": [
+            "action",
+            "partition",
+            "filesystem"
+          ]
         }
       ]
     },
@@ -141,6 +432,138 @@
           "minimum": 0
         }
       }
+    },
+    "ManualLayout": {
+      "description": "An explicit layout: what to do with each partition. Partitions no action\nnames are kept untouched. Sizes are MiB (1024 * 1024 bytes).",
+      "type": "object",
+      "properties": {
+        "actions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/LayoutAction"
+          }
+        },
+        "new_table": {
+          "description": "Replace the partition table with an empty GPT one, erasing every\npartition, before the `create` actions. Only `create` may follow.",
+          "type": "boolean",
+          "default": false
+        },
+        "swap_file": {
+          "description": "A swap file in the installed system, in place of (or as well as) a\nswap partition.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SwapFileRequest"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "table_id": {
+          "description": "When set, the disk's table must still have this id (`inspect`'s\n`table_id`), so a plan made for one disk never edits another.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "actions"
+      ]
+    },
+    "PartitionChange": {
+      "type": "object",
+      "properties": {
+        "after": {
+          "description": "The partition after apply (`None` when it is erased).",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PartitionState"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "before": {
+          "description": "The partition on the disk now (`None` when it is created).",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PartitionState"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "change": {
+          "$ref": "#/$defs/ChangeKind"
+        },
+        "device": {
+          "type": "string"
+        },
+        "mountpoint": {
+          "description": "Where the installed system mounts it (`None`: not mounted).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "number": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "role": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Role"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "number",
+        "device",
+        "change"
+      ]
+    },
+    "PartitionState": {
+      "type": "object",
+      "properties": {
+        "filesystem": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "fs_label": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "size_bytes": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "start_bytes": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "start_bytes",
+        "size_bytes"
+      ]
     },
     "PartitionTemplate": {
       "type": "object",
@@ -236,6 +659,95 @@
       "required": [
         "mode",
         "efi_size_mb"
+      ]
+    },
+    "Role": {
+      "description": "What the installed system uses a partition for. Each role has its mount\npoint; `other` takes the layout's `mountpoint`.",
+      "oneOf": [
+        {
+          "description": "The EFI system partition, mounted at /boot (vfat).",
+          "type": "string",
+          "const": "efi"
+        },
+        {
+          "description": "The one root of a mutable install, at / (ext4).",
+          "type": "string",
+          "const": "root"
+        },
+        {
+          "description": "A/B root slot A, installed now and mounted at / (ext4).",
+          "type": "string",
+          "const": "root_a"
+        },
+        {
+          "description": "A/B root slot B, left unmounted for updates (ext4).",
+          "type": "string",
+          "const": "root_b"
+        },
+        {
+          "description": "The persistent /var: the A/B state partition, or a mutable install's own /var (ext4).",
+          "type": "string",
+          "const": "state"
+        },
+        {
+          "description": "/home (ext4).",
+          "type": "string",
+          "const": "home"
+        },
+        {
+          "description": "A swap partition, activated with swapon.",
+          "type": "string",
+          "const": "swap"
+        },
+        {
+          "description": "Mounted at the action's `mountpoint`.",
+          "type": "string",
+          "const": "other"
+        }
+      ]
+    },
+    "SwapFileLocation": {
+      "description": "Where a swap file goes: the root or the /var filesystem.",
+      "type": "string",
+      "enum": [
+        "root",
+        "var"
+      ]
+    },
+    "SwapFilePlan": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "description": "The file's path in the installed system (`/swapfile`, `/var/swapfile`).",
+          "type": "string"
+        },
+        "size_mb": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "path",
+        "size_mb"
+      ]
+    },
+    "SwapFileRequest": {
+      "type": "object",
+      "properties": {
+        "location": {
+          "$ref": "#/$defs/SwapFileLocation"
+        },
+        "size_mb": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "size_mb",
+        "location"
       ]
     }
   }
