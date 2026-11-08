@@ -8,6 +8,7 @@ authors.workspace = true
 description = "Mode-aware partition planning and apply backend for LevitateOS"
 
 [dependencies]
+anyhow = { workspace = true, optional = true }
 clap = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -15,11 +16,12 @@ target-root = { path = "../recstrap/target-root" }
 libc = { workspace = true }
 schemars = { workspace = true, optional = true }
 ts-rs = { workspace = true, optional = true }
+tool-contract = { path = "../recstrap/tool-contract", optional = true }
 
 [features]
 # Derive the JSON Schemas and TypeScript declarations of the JSON output
 # (`cargo xtask gen`); the shipped tool does not need them.
-contracts = ["dep:schemars", "dep:ts-rs"]
+contracts = ["dep:schemars", "dep:ts-rs", "dep:tool-contract", "dep:anyhow"]
 
 [dev-dependencies]
 tempfile = { workspace = true }

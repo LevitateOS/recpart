@@ -621,10 +621,6 @@
     "PartitionTemplate": {
       "type": "object",
       "properties": {
-        "bootable": {
-          "description": "The legacy-BIOS bootable flag (set on the ESP).",
-          "type": "boolean"
-        },
         "filesystem": {
           "$ref": "#/$defs/Filesystem"
         },
@@ -661,7 +657,6 @@
         "filesystem",
         "label",
         "gpt_type",
-        "bootable",
         "mountpoint"
       ]
     },

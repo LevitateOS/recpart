@@ -68,7 +68,8 @@ pub struct PlanArgs {
     #[arg(
         long = "layout",
         value_name = "FILE",
-        conflicts_with_all = ["efi_size_mb", "root_size_mb", "root_a_size_mb", "root_b_size_mb", "state_size_mb"]
+        // clap groups a flattened struct's flags under the struct's name.
+        conflicts_with = "LayoutRequest"
     )]
     pub layout_file: Option<PathBuf>,
 
@@ -83,7 +84,7 @@ pub struct ApplyArgs {
     #[command(flatten)]
     pub plan: PlanArgs,
 
-    /// Mount root used for target topology (default /mnt)
+    /// Mount root used for target topology
     #[arg(long, default_value = crate::policy::DEFAULT_MOUNT_ROOT)]
     pub mount_root: PathBuf,
 
@@ -91,8 +92,8 @@ pub struct ApplyArgs {
     #[arg(long)]
     pub dry_run: bool,
 
-    /// Destructive apply confirmation token (must be DESTROY)
-    #[arg(long)]
+    /// Destructive apply confirmation token
+    #[arg(long, help = format!("Destructive apply confirmation token (must be {})", crate::types::CONFIRM_TOKEN))]
     pub confirm: Option<String>,
 
     /// The plan the user confirmed (what `plan --json` printed for the same

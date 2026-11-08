@@ -51,8 +51,48 @@ pub enum ErrorCode {
 }
 
 impl ErrorCode {
+    pub const ALL: &'static [ErrorCode] = &[
+        ErrorCode::InvalidTargetDisk,
+        ErrorCode::MissingTool,
+        ErrorCode::PlanGeneration,
+        ErrorCode::MissingConfirmation,
+        ErrorCode::PartitionApplyFailed,
+        ErrorCode::FormatFailed,
+        ErrorCode::MountFailed,
+        ErrorCode::NotRoot,
+        ErrorCode::Internal,
+        ErrorCode::InvalidMountRoot,
+        ErrorCode::InvalidLayout,
+        ErrorCode::LayoutDoesNotFit,
+        ErrorCode::ModeRequirements,
+        ErrorCode::DuplicateMountpoint,
+        ErrorCode::PartitionTooSmall,
+        ErrorCode::EfiUnsuitable,
+        ErrorCode::ResizeUnsupported,
+        ErrorCode::ShrinkBelowUsed,
+        ErrorCode::Misaligned,
+        ErrorCode::DiskChanged,
+        ErrorCode::InvalidInventory,
+        ErrorCode::ResizeFailed,
+        ErrorCode::SwapFailed,
+        ErrorCode::InvalidExpectedPlan,
+    ];
+
     pub fn exit_status(self) -> u8 {
         self as u8
+    }
+
+    /// The variant's name in SCREAMING_SNAKE_CASE (`DISK_CHANGED`), the name
+    /// front ends know the code by.
+    pub fn name(self) -> String {
+        let mut name = String::new();
+        for (i, c) in format!("{self:?}").chars().enumerate() {
+            if c.is_ascii_uppercase() && i > 0 {
+                name.push('_');
+            }
+            name.push(c.to_ascii_uppercase());
+        }
+        name
     }
 }
 
