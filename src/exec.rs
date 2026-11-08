@@ -126,7 +126,7 @@ pub fn execute_plan(plan: &PartitionPlan, opts: &ApplyOptions) -> Result<ApplyRe
             _ => None,
         })
         .collect();
-    let handoff = build_handoff(plan, mounted, swaps);
+    let handoff = build_handoff(plan, mounted, swaps)?;
 
     let steps = if opts.dry_run {
         actions.iter().map(|action| action.record(true)).collect()
@@ -343,7 +343,8 @@ fn build_apply_actions(plan: &PartitionPlan, mount_root: &Path) -> Vec<Execution
             .filter_map(format_command),
     );
 
-    let sysroot = install_root(mount_root);
+    // The installed system's root is the mount root itself.
+    let sysroot = mount_root.to_path_buf();
     let mut mounted: Vec<&PartitionTemplate> = plan
         .partitions
         .iter()
@@ -403,12 +404,6 @@ fn required_programs(actions: &[ExecutionAction]) -> Vec<String> {
     programs.sort();
     programs.dedup();
     programs
-}
-
-/// Where the installed system's root is mounted during installation: the mount
-/// root itself, so the guides' `recstrap /mnt` is the target.
-fn install_root(mount_root: &Path) -> PathBuf {
-    mount_root.to_path_buf()
 }
 
 fn formatted_devices(plan: &PartitionPlan) -> Vec<String> {

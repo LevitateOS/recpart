@@ -1,5 +1,108 @@
 use crate::error::{ErrorCode, RecpartError, Result};
-use crate::types::{Filesystem, InstallMode, LayoutRequest, PartitionTemplate, ResolvedLayout};
+use crate::types::{Filesystem, InstallMode, LayoutRequest, PartitionTemplate, ResolvedLayout, Role};
+
+// The installed disk layout: what every tool that formats, mounts, boots or
+// carries a partition reads (recpart's templates and manual layouts, recab,
+// recsetup, recfstab, the install tests).
+
+/// Where the ESP is mounted in the installed system (recab writes the boot
+/// entries and kernels there).
+pub const ESP_MOUNT: &str = "/boot";
+/// Where the persistent state partition is mounted (recab keeps its state there).
+pub const STATE_MOUNT: &str = "/var";
+/// The installed system's root.
+pub const ROOT_MOUNT: &str = "/";
+/// Where the install mounts the new system by default.
+pub const DEFAULT_MOUNT_ROOT: &str = "/mnt";
+
+/// GPT partition type GUIDs.
+pub const EFI_TYPE: &str = "C12A7328-F81F-11D2-BA4B-00A0C93EC93B";
+pub const LINUX_TYPE: &str = "0FC63DAF-8483-4772-8E79-3D69D8477DE4";
+pub const SWAP_TYPE: &str = "0657FD6D-A4AB-43C4-84E5-0933C84B4F4F";
+pub const BASIC_DATA_TYPE: &str = "EBD0A0A2-B9E5-4433-87C0-68B6B72699C7";
+
+/// One MiB, the unit of every `_mb` size.
+pub const MIB: u64 = 1024 * 1024;
+
+impl Role {
+    /// The filesystem recpart makes for the role.
+    pub fn filesystem(self) -> Filesystem {
+        match self {
+            Role::Efi => Filesystem::Vfat,
+            Role::Swap => Filesystem::Swap,
+            Role::Root | Role::RootA | Role::RootB | Role::State | Role::Home | Role::Other => {
+                Filesystem::Ext4
+            }
+        }
+    }
+
+    /// The filesystem label recpart gives the role (`None`: the layout's own).
+    pub fn label(self) -> Option<&'static str> {
+        Some(match self {
+            Role::Efi => "EFI",
+            Role::Root => "ROOT",
+            Role::RootA => "ROOT_A",
+            Role::RootB => "ROOT_B",
+            Role::State => "STATE",
+            Role::Home => "HOME",
+            Role::Swap => "SWAP",
+            Role::Other => return None,
+        })
+    }
+
+    /// The role's mount point in the installed system (`None`: not mounted,
+    /// or for `other` the layout's own).
+    pub fn mountpoint(self) -> Option<&'static str> {
+        match self {
+            Role::Efi => Some(ESP_MOUNT),
+            Role::Root | Role::RootA => Some(ROOT_MOUNT),
+            Role::RootB | Role::Swap | Role::Other => None,
+            Role::State => Some(STATE_MOUNT),
+            Role::Home => Some("/home"),
+        }
+    }
+
+    /// The GPT type recpart gives a partition it creates for the role with
+    /// the filesystem `fs`: the ESP's, else the filesystem's.
+    pub fn gpt_type(role: Option<Role>, fs: Filesystem) -> &'static str {
+        match (role, fs) {
+            (Some(Role::Efi), _) => EFI_TYPE,
+            (_, Filesystem::Swap) => SWAP_TYPE,
+            (_, Filesystem::Vfat) => BASIC_DATA_TYPE,
+            (_, Filesystem::Ext4) => LINUX_TYPE,
+        }
+    }
+
+    /// The A/B slot role (`A` or `B`).
+    pub fn slot(slot: char) -> Option<Role> {
+        match slot.to_ascii_uppercase() {
+            'A' => Some(Role::RootA),
+            'B' => Some(Role::RootB),
+            _ => None,
+        }
+    }
+}
+
+/// The partitions a mode's template creates, in order.
+pub fn template_roles(mode: InstallMode) -> &'static [Role] {
+    match mode {
+        InstallMode::Ab => &[Role::Efi, Role::RootA, Role::RootB, Role::State],
+        InstallMode::Mutable => &[Role::Efi, Role::Root],
+    }
+}
+
+/// The smallest disk a mode's template fits with its default sizes, in MiB:
+/// the partitions, the policy minimum of the one taking the rest, and the
+/// table's own room (the first MiB and the backup GPT).
+pub fn min_disk_mb(mode: InstallMode) -> u64 {
+    let layout = policy_defaults(mode);
+    let templates = build_templates(&layout);
+    let parts: u64 = templates
+        .iter()
+        .map(|p| u64::from(p.size_mb.unwrap_or_else(|| remaining_min_mb(mode))))
+        .sum();
+    parts + 2
+}
 
 /// Mount point of a partition that is not mounted during installation (the
 /// inactive A/B slot), as in fstab.
@@ -119,72 +222,26 @@ pub fn remaining_min_mb(mode: InstallMode) -> u32 {
 }
 
 pub fn build_templates(layout: &ResolvedLayout) -> Vec<PartitionTemplate> {
-    match layout.mode {
-        InstallMode::Ab => vec![
-            PartitionTemplate {
-                index: 1,
-                name: "efi".to_string(),
-                filesystem: Filesystem::Vfat,
-                label: "EFI".to_string(),
-                gpt_type: "U".to_string(),
-                bootable: true,
-                size_mb: Some(layout.efi_size_mb),
-                mountpoint: "/boot".to_string(),
+    template_roles(layout.mode)
+        .iter()
+        .zip(1u8..)
+        .map(|(&role, index)| PartitionTemplate {
+            index,
+            name: role.as_str().to_string(),
+            filesystem: role.filesystem(),
+            label: role.label().expect("template roles have labels").to_string(),
+            gpt_type: Role::gpt_type(Some(role), role.filesystem()).to_string(),
+            size_mb: match role {
+                Role::Efi => Some(layout.efi_size_mb),
+                Role::Root => layout.root_size_mb,
+                Role::RootA => layout.root_a_size_mb,
+                Role::RootB => layout.root_b_size_mb,
+                Role::State => layout.state_size_mb,
+                Role::Home | Role::Swap | Role::Other => None,
             },
-            PartitionTemplate {
-                index: 2,
-                name: "root_a".to_string(),
-                filesystem: Filesystem::Ext4,
-                label: "ROOT_A".to_string(),
-                gpt_type: "L".to_string(),
-                bootable: false,
-                size_mb: layout.root_a_size_mb,
-                mountpoint: "/".to_string(),
-            },
-            PartitionTemplate {
-                index: 3,
-                name: "root_b".to_string(),
-                filesystem: Filesystem::Ext4,
-                label: "ROOT_B".to_string(),
-                gpt_type: "L".to_string(),
-                bootable: false,
-                size_mb: layout.root_b_size_mb,
-                mountpoint: NOT_MOUNTED.to_string(),
-            },
-            PartitionTemplate {
-                index: 4,
-                name: "state".to_string(),
-                filesystem: Filesystem::Ext4,
-                label: "STATE".to_string(),
-                gpt_type: "L".to_string(),
-                bootable: false,
-                size_mb: layout.state_size_mb,
-                mountpoint: "/var".to_string(),
-            },
-        ],
-        InstallMode::Mutable => vec![
-            PartitionTemplate {
-                index: 1,
-                name: "efi".to_string(),
-                filesystem: Filesystem::Vfat,
-                label: "EFI".to_string(),
-                gpt_type: "U".to_string(),
-                bootable: true,
-                size_mb: Some(layout.efi_size_mb),
-                mountpoint: "/boot".to_string(),
-            },
-            PartitionTemplate {
-                index: 2,
-                name: "root".to_string(),
-                filesystem: Filesystem::Ext4,
-                label: "ROOT".to_string(),
-                gpt_type: "L".to_string(),
-                bootable: false,
-                size_mb: layout.root_size_mb,
-                mountpoint: "/".to_string(),
-            },
-        ],
-    }
+            mountpoint: role.mountpoint().unwrap_or(NOT_MOUNTED).to_string(),
+        })
+        .collect()
 }
 
 fn validate_positive(field: &str, value: u32) -> Result<u32> {

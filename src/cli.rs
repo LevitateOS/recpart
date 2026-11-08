@@ -84,7 +84,7 @@ pub struct ApplyArgs {
     pub plan: PlanArgs,
 
     /// Mount root used for target topology (default /mnt)
-    #[arg(long, default_value = "/mnt")]
+    #[arg(long, default_value = crate::policy::DEFAULT_MOUNT_ROOT)]
     pub mount_root: PathBuf,
 
     /// Plan and print commands without touching disk state.

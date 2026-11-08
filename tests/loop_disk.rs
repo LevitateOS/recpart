@@ -2,7 +2,7 @@
 //! a real apply, checked through the kernel's view of the disk. Needs root
 //! (losetup, mkfs, mount); run with `--include-ignored` as root.
 
-use recpart::types::{ApplyResult, PartitionPlan, CONFIRM_TOKEN};
+use recpart::types::{ApplyResult, InstallMode, PartitionPlan, CONFIRM_TOKEN};
 use std::process::Command;
 
 fn run(program: &str, args: &[&str]) -> String {
@@ -76,20 +76,19 @@ fn ab_layout_is_planned_applied_and_handed_off() {
     let plan: PartitionPlan =
         serde_json::from_str(&recpart(&["plan", "--disk", &disk.device, "--mode", "ab", "--json"]))
             .unwrap();
-    let layout: Vec<(&str, String, &str)> = plan
+    let roles = recpart::policy::template_roles(InstallMode::Ab);
+    let layout: Vec<(&str, &str, &str)> = plan
         .partitions
         .iter()
-        .map(|p| (p.label.as_str(), serde_json::to_value(p.filesystem).unwrap().as_str().unwrap().to_string(), p.mountpoint.as_str()))
+        .map(|p| (p.label.as_str(), p.filesystem.as_str(), p.mountpoint.as_str()))
         .collect();
-    assert_eq!(
-        layout,
-        [
-            ("EFI", "vfat".to_string(), "/boot"),
-            ("ROOT_A", "ext4".to_string(), "/"),
-            ("ROOT_B", "ext4".to_string(), "none"),
-            ("STATE", "ext4".to_string(), "/var"),
-        ]
-    );
+    let expected: Vec<(&str, &str, &str)> = roles
+        .iter()
+        .map(|r| {
+            (r.label().unwrap(), r.filesystem().as_str(), r.mountpoint().unwrap_or(recpart::policy::NOT_MOUNTED))
+        })
+        .collect();
+    assert_eq!(layout, expected);
 
     let dry: ApplyResult = serde_json::from_str(&recpart(&[
         "apply", "--disk", &disk.device, "--mode", "ab", "--dry-run", "--mount-root", mount_root,
@@ -109,7 +108,9 @@ fn ab_layout_is_planned_applied_and_handed_off() {
     // The kernel sees the planned labels and filesystems...
     let lsblk = run("lsblk", &["-nr", "-o", "LABEL,FSTYPE", &disk.device]);
     let seen: Vec<&str> = lsblk.lines().map(str::trim).filter(|l| !l.is_empty()).collect();
-    assert_eq!(seen, ["EFI vfat", "ROOT_A ext4", "ROOT_B ext4", "STATE ext4"]);
+    let expected: Vec<String> =
+        roles.iter().map(|r| format!("{} {}", r.label().unwrap(), r.filesystem().as_str())).collect();
+    assert_eq!(seen, expected);
 
     // ...and the handoff names what is really mounted, slot B left unmounted.
     assert_eq!(applied.handoff.install_target, mount_root);

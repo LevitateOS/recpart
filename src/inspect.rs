@@ -18,7 +18,7 @@ use std::fs;
 use std::path::Path;
 use std::process::Command;
 
-pub const MIB: u64 = 1024 * 1024;
+pub use crate::policy::MIB;
 
 /// The columns `inspect` reads for the disk and each partition.
 const PART_COLUMNS: &str =

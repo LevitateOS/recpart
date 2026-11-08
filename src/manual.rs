@@ -17,10 +17,6 @@ use crate::types::{
 };
 use std::collections::{BTreeMap, HashMap};
 
-pub const EFI_TYPE: &str = "C12A7328-F81F-11D2-BA4B-00A0C93EC93B";
-pub const LINUX_TYPE: &str = "0FC63DAF-8483-4772-8E79-3D69D8477DE4";
-pub const SWAP_TYPE: &str = "0657FD6D-A4AB-43C4-84E5-0933C84B4F4F";
-pub const BASIC_DATA_TYPE: &str = "EBD0A0A2-B9E5-4433-87C0-68B6B72699C7";
 /// Partitions the install formats or uses start on this boundary at least.
 const MIN_ALIGNMENT: u64 = 4096;
 /// GPT holds 128 partition entries.
@@ -81,45 +77,19 @@ impl Planned<'_> {
 /// The role's mount point in the installed system (`None`: not mounted).
 pub fn role_mountpoint(role: Role, other: Option<&str>) -> Option<String> {
     match role {
-        Role::Efi => Some("/boot".to_string()),
-        Role::Root | Role::RootA => Some("/".to_string()),
-        Role::RootB | Role::Swap => None,
-        Role::State => Some("/var".to_string()),
-        Role::Home => Some("/home".to_string()),
         Role::Other => other.map(str::to_string),
+        role => role.mountpoint().map(str::to_string),
     }
 }
 
 fn default_filesystem(role: Option<Role>) -> Filesystem {
-    match role {
-        Some(Role::Efi) => Filesystem::Vfat,
-        Some(Role::Swap) => Filesystem::Swap,
-        _ => Filesystem::Ext4,
-    }
+    role.map_or(Filesystem::Ext4, Role::filesystem)
 }
 
 fn default_label(role: Option<Role>) -> Option<String> {
-    let label = match role? {
-        Role::Efi => "EFI",
-        Role::Root => "ROOT",
-        Role::RootA => "ROOT_A",
-        Role::RootB => "ROOT_B",
-        Role::State => "STATE",
-        Role::Home => "HOME",
-        Role::Swap => "SWAP",
-        Role::Other => return None,
-    };
-    Some(label.to_string())
+    role?.label().map(str::to_string)
 }
 
-fn type_for(fs: Filesystem, role: Option<Role>) -> &'static str {
-    match (role, fs) {
-        (Some(Role::Efi), _) => EFI_TYPE,
-        (_, Filesystem::Swap) => SWAP_TYPE,
-        (_, Filesystem::Vfat) => BASIC_DATA_TYPE,
-        (_, Filesystem::Ext4) => LINUX_TYPE,
-    }
-}
 
 /// A mount point the installed system can use: absolute, normalized, not `/`.
 fn check_mountpoint(mountpoint: &str) -> Result<()> {
@@ -318,7 +288,7 @@ pub fn build_manual_plan(
                     change: ChangeKind::Formatted,
                     new_fs: Some(*filesystem),
                     type_guid: if role.is_some() {
-                        type_for(*filesystem, *role).to_string()
+                        Role::gpt_type(*role, *filesystem).to_string()
                     } else {
                         base.type_guid.clone()
                     },
@@ -549,7 +519,7 @@ pub fn build_manual_plan(
             new_label: label.clone(),
             role: *role,
             mountpoint: mountpoint.clone(),
-            type_guid: type_for(fs, *role).to_string(),
+            type_guid: Role::gpt_type(*role, fs).to_string(),
             name: label,
             uuid: None,
             attrs: None,
@@ -574,7 +544,6 @@ pub fn build_manual_plan(
             filesystem,
             label: p.fs_label().unwrap_or_default(),
             gpt_type: p.type_guid.clone(),
-            bootable: false,
             size_mb: Some(u32::try_from(p.size / MIB).unwrap_or(u32::MAX)),
             mountpoint: role_mountpoint(role, p.mountpoint.as_deref())
                 .unwrap_or_else(|| NOT_MOUNTED.to_string()),
@@ -693,7 +662,7 @@ fn check_roles(planned: &[Planned], mode: InstallMode, physical_sector: u32) -> 
                 "Give it a `format` action (its data is lost), or create a new partition for the role.",
             ));
         }
-        if role == Role::Efi && keeps_data && !p.type_guid.eq_ignore_ascii_case(EFI_TYPE) {
+        if role == Role::Efi && keeps_data && !p.type_guid.eq_ignore_ascii_case(crate::policy::EFI_TYPE) {
             return Err(refuse(
                 ErrorCode::EfiUnsuitable,
                 "a reused EFI partition has the EFI system partition type",

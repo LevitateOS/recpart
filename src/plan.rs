@@ -7,7 +7,7 @@ use crate::types::{
 };
 use std::path::Path;
 
-const MB: u64 = 1024 * 1024;
+use crate::policy::MIB as MB;
 
 /// Plan the layout for `disk`; the disk must hold every fixed-size partition
 /// plus the policy minimum for the one that takes the remaining space.
@@ -101,10 +101,9 @@ pub fn build_sfdisk_script(partitions: &[PartitionTemplate]) -> String {
     lines.push("label: gpt".to_string());
 
     for part in partitions {
-        let line = match (part.size_mb, part.bootable) {
-            (Some(size_mb), true) => format!(",{size_mb}M,{},*", part.gpt_type),
-            (Some(size_mb), false) => format!(",{size_mb}M,{}", part.gpt_type),
-            (None, _) => format!(",,{}", part.gpt_type),
+        let line = match part.size_mb {
+            Some(size_mb) => format!(",{size_mb}M,{}", part.gpt_type),
+            None => format!(",,{}", part.gpt_type),
         };
         lines.push(line);
     }

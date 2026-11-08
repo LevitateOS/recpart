@@ -24,11 +24,10 @@ pub enum InstallMode {
 }
 
 impl fmt::Display for InstallMode {
+    /// Its JSON (and CLI) spelling.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            InstallMode::Ab => write!(f, "ab"),
-            InstallMode::Mutable => write!(f, "mutable"),
-        }
+        let value = serde_json::to_value(self).map_err(|_| fmt::Error)?;
+        f.write_str(value.as_str().ok_or(fmt::Error)?)
     }
 }
 
@@ -74,7 +73,9 @@ pub enum Filesystem {
 }
 
 impl Filesystem {
-    /// The name blkid and lsblk report for it.
+    pub const ALL: &'static [Filesystem] = &[Filesystem::Vfat, Filesystem::Ext4, Filesystem::Swap];
+
+    /// The name blkid and lsblk report for it (its serialized name).
     pub fn as_str(self) -> &'static str {
         match self {
             Filesystem::Vfat => "vfat",
@@ -84,12 +85,7 @@ impl Filesystem {
     }
 
     pub fn from_blkid(name: &str) -> Option<Self> {
-        match name {
-            "vfat" => Some(Filesystem::Vfat),
-            "ext4" => Some(Filesystem::Ext4),
-            "swap" => Some(Filesystem::Swap),
-            _ => None,
-        }
+        Self::ALL.iter().copied().find(|fs| fs.as_str() == name)
     }
 }
 
@@ -101,8 +97,6 @@ pub struct PartitionTemplate {
     pub filesystem: Filesystem,
     pub label: String,
     pub gpt_type: String,
-    /// The legacy-BIOS bootable flag (set on the ESP).
-    pub bootable: bool,
     pub size_mb: Option<u32>,
     pub mountpoint: String,
 }
