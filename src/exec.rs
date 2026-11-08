@@ -233,18 +233,8 @@ fn format_command(change: &PartitionChange) -> Option<ExecutionAction> {
     let after = change.after.as_ref()?;
     let fs = after.filesystem.as_deref().and_then(Filesystem::from_blkid)?;
     let label = after.fs_label.as_deref().filter(|l| !l.is_empty());
-    let (program, mut args): (&str, Vec<&str>) = match fs {
-        Filesystem::Vfat => ("mkfs.vfat", vec!["-F", "32"]),
-        Filesystem::Ext4 => ("mkfs.ext4", vec!["-F"]),
-        Filesystem::Swap => ("mkswap", vec![]),
-    };
-    if let Some(label) = label {
-        args.push(match fs {
-            Filesystem::Vfat => "-n",
-            _ => "-L",
-        });
-        args.push(label);
-    }
+    let (program, args) = fs.mkfs(label);
+    let mut args: Vec<&str> = args.iter().map(String::as_str).collect();
     args.push(&change.device);
     Some(run(Phase::Format, program, &args))
 }

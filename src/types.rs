@@ -75,6 +75,21 @@ pub enum Filesystem {
 impl Filesystem {
     pub const ALL: &'static [Filesystem] = &[Filesystem::Vfat, Filesystem::Ext4, Filesystem::Swap];
 
+    /// The program and arguments that make this filesystem, labelled, on a
+    /// device given last (recpart's formatting, and recab's staging of a slot).
+    pub fn mkfs(self, label: Option<&str>) -> (&'static str, Vec<String>) {
+        let (program, mut args): (&str, Vec<String>) = match self {
+            Filesystem::Vfat => ("mkfs.vfat", vec!["-F".into(), "32".into()]),
+            Filesystem::Ext4 => ("mkfs.ext4", vec!["-F".into()]),
+            Filesystem::Swap => ("mkswap", vec![]),
+        };
+        if let Some(label) = label {
+            args.push(if self == Filesystem::Vfat { "-n" } else { "-L" }.into());
+            args.push(label.into());
+        }
+        (program, args)
+    }
+
     /// The name blkid and lsblk report for it (its serialized name).
     pub fn as_str(self) -> &'static str {
         match self {
