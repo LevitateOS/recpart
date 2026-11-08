@@ -328,11 +328,8 @@ fn build_apply_actions(plan: &PartitionPlan, mount_root: &Path) -> Vec<Execution
         *stdin = Some(plan.sfdisk_script.clone());
     }
     actions.push(sfdisk);
-    // Let udev finish with the new partitions where it runs; without it (mdev on AcornOS),
-    // the kernel's devtmpfs makes the nodes, and VerifyPartitions waits for them either way.
-    if crate::preflight::tool_in_path("udevadm") {
-        actions.push(run(Phase::Partition, "udevadm", &["settle", "--timeout=10"]));
-    }
+    // Let udev finish with the new partitions; VerifyPartitions then waits for the nodes.
+    actions.push(run(Phase::Partition, "udevadm", &["settle", "--timeout=10"]));
     actions.push(ExecutionAction::VerifyPartitions);
     actions.extend(resized(true));
 

@@ -173,7 +173,7 @@ pub fn ensure_root_for_apply() -> Result<()> {
         "preflight",
         "apply runs as root".to_string(),
         "effective uid is not root".to_string(),
-        "Re-run with root privileges (sudo).",
+        "Re-run as root.",
     ))
 }
 
