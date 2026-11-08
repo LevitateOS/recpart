@@ -15,7 +15,7 @@ use crate::types::{
 };
 use serde::Deserialize;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::Command;
 
 pub const MIB: u64 = 1024 * 1024;
@@ -126,9 +126,9 @@ pub fn inspect_disk(path: &Path) -> Result<InspectResult> {
         .iter()
         .filter(|d| d.dev_type == "part")
         .collect();
-    let sfdisk = read_sfdisk(&disk.target.path);
+    let sfdisk = read_sfdisk(&disk.target.path)?;
 
-    let sector = u64::from(disk.target.logical_sector_bytes.max(512));
+    let sector = u64::from(disk.target.logical_sector_bytes);
     let table = match sfdisk
         .as_ref()
         .map(|t| t.label.as_str())
@@ -193,7 +193,10 @@ pub fn inspect_disk(path: &Path) -> Result<InspectResult> {
             .collect(),
     };
     partitions.sort_by_key(|p| p.start_bytes);
-    let signatures = read_wipefs(&disk.target.path).unwrap_or_else(|| lsblk_signature(whole));
+    let signatures = match read_wipefs(&disk.target.path)? {
+        Some(signatures) => signatures,
+        None => lsblk_signature(whole),
+    };
     Ok(finish_inventory(
         disk,
         table,
@@ -205,24 +208,41 @@ pub fn inspect_disk(path: &Path) -> Result<InspectResult> {
     ))
 }
 
+/// A disk tool's output that recpart cannot use.
+fn unreadable(tool: &str, disk: &Path, observed: String) -> RecpartError {
+    RecpartError::new(
+        ErrorCode::InvalidTargetDisk,
+        "inspect",
+        format!("{tool} describes {}", disk.display()),
+        observed,
+        format!("Run '{tool} --json {}' as root and check its output.", disk.display()),
+    )
+}
+
 /// The signatures on the whole disk itself, from `wipefs --no-act` (it
 /// changes nothing, and lists only the device's own signatures, not its
-/// partitions'). `None` when wipefs is missing or cannot read the disk.
-fn read_wipefs(disk: &Path) -> Option<Vec<DiskSignature>> {
-    let output = Command::new("wipefs")
+/// partitions'). `None` when wipefs is not installed or cannot open the disk
+/// (not root): then lsblk's view is all there is.
+fn read_wipefs(disk: &Path) -> Result<Option<Vec<DiskSignature>>> {
+    let output = match Command::new("wipefs")
         .args(["--no-act", "--json"])
         .arg(disk)
         .env("LC_ALL", "C")
         .output()
-        .ok()?;
+    {
+        Ok(output) => output,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(err) => return Err(unreadable("wipefs", disk, err.to_string())),
+    };
     if !output.status.success() {
-        return None;
+        return Ok(None);
     }
     // Some versions print nothing at all for a blank device.
     if output.stdout.iter().all(u8::is_ascii_whitespace) {
-        return Some(Vec::new());
+        return Ok(Some(Vec::new()));
     }
-    let listed: WipefsJson = serde_json::from_slice(&output.stdout).ok()?;
+    let listed: WipefsJson = serde_json::from_slice(&output.stdout)
+        .map_err(|err| unreadable("wipefs", disk, format!("unparseable JSON: {err}")))?;
     let full = disk.to_string_lossy();
     let name = disk.file_name().map(|n| n.to_string_lossy()).unwrap_or_default();
     let nonempty = |v: Option<String>| v.filter(|v| !v.trim().is_empty());
@@ -232,16 +252,17 @@ fn read_wipefs(disk: &Path) -> Option<Vec<DiskSignature>> {
         .filter(|s| s.device == full || s.device == name)
         .filter(|s| !TABLE_SIGNATURES.contains(&s.kind.as_str()))
         .map(|s| {
-            // An offset it can't read makes the whole answer unreliable: fall back.
-            let offset_bytes = u64::from_str_radix(s.offset.trim().trim_start_matches("0x"), 16).ok()?;
-            Some(DiskSignature {
+            let offset_bytes = u64::from_str_radix(s.offset.trim().trim_start_matches("0x"), 16)
+                .map_err(|err| unreadable("wipefs", disk, format!("offset '{}': {err}", s.offset)))?;
+            Ok(DiskSignature {
                 kind: s.kind,
                 offset_bytes,
                 uuid: nonempty(s.uuid),
                 label: nonempty(s.label),
             })
         })
-        .collect()
+        .collect::<Result<Vec<_>>>()
+        .map(Some)
 }
 
 /// Without wipefs: the filesystem udev found on the bare disk, if any (its
@@ -325,6 +346,12 @@ pub fn load_inventory(path: &Path) -> Result<InspectResult> {
         return Err(fail(format!(
             "schema_version {}, expected {INSPECT_SCHEMA_VERSION}",
             inventory.schema_version
+        )));
+    }
+    if !crate::preflight::valid_sector_bytes(inventory.disk.target.logical_sector_bytes) {
+        return Err(fail(format!(
+            "logical_sector_bytes is {}, not a power of two of at least 512",
+            inventory.disk.target.logical_sector_bytes
         )));
     }
     let mut partitions = inventory.partitions;
@@ -480,14 +507,20 @@ fn partition_info(
     }
 }
 
-fn read_sfdisk(disk: &Path) -> Option<SfdiskTable> {
-    let output = Command::new("sfdisk").arg("--json").arg(disk).output().ok()?;
+/// The partition table as sfdisk reads it; `None` when sfdisk finds no table
+/// or cannot open the disk (not root), so lsblk's view is used.
+fn read_sfdisk(disk: &Path) -> Result<Option<SfdiskTable>> {
+    let output = Command::new("sfdisk")
+        .arg("--json")
+        .arg(disk)
+        .output()
+        .map_err(|err| unreadable("sfdisk", disk, err.to_string()))?;
     if !output.status.success() {
-        return None;
+        return Ok(None);
     }
     serde_json::from_slice::<SfdiskJson>(&output.stdout)
-        .ok()
-        .map(|j| j.partitiontable)
+        .map(|j| Some(j.partitiontable))
+        .map_err(|err| unreadable("sfdisk", disk, format!("unparseable JSON: {err}")))
 }
 
 fn trailing_number(node: &str) -> Option<u32> {
@@ -574,12 +607,7 @@ fn probe_free_bytes(filesystem: Option<&str>, device: &str) -> Option<u64> {
     }
 }
 
+/// A partition's size for the free-space probes, which are best effort.
 fn block_device_size(device: &str) -> Option<u64> {
-    let name = PathBuf::from(device).file_name()?.to_string_lossy().to_string();
-    let sectors: u64 = fs::read_to_string(format!("/sys/class/block/{name}/size"))
-        .ok()?
-        .trim()
-        .parse()
-        .ok()?;
-    Some(sectors * 512)
+    target_root::block_device_bytes(Path::new(device)).ok()
 }

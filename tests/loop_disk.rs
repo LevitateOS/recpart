@@ -47,10 +47,23 @@ impl LoopDisk {
     }
 }
 
+fn report(what: &str, status: std::io::Result<std::process::ExitStatus>) {
+    match status {
+        Ok(status) if status.success() => {}
+        Ok(status) => eprintln!("cleanup: {what} failed ({status})"),
+        Err(err) => eprintln!("cleanup: {what} did not run: {err}"),
+    }
+}
+
 impl Drop for LoopDisk {
     fn drop(&mut self) {
-        let _ = Command::new("umount").arg("-R").arg(&self.mount_root).status();
-        let _ = Command::new("losetup").args(["-d", &self.device]).status();
+        // The test may have unmounted it already; what does not clean up is said.
+        let mounted = target_root::mount_table()
+            .map(|table| table.iter().any(|m| m.mount_point.starts_with(&self.mount_root)));
+        if mounted.unwrap_or(true) {
+            report("umount -R", Command::new("umount").arg("-R").arg(&self.mount_root).status());
+        }
+        report("losetup -d", Command::new("losetup").args(["-d", &self.device]).status());
     }
 }
 

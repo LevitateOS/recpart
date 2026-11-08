@@ -544,7 +544,7 @@ fn wait_for_partition_devices(plan: &PartitionPlan, timeout: Duration) -> Result
 
     let start = Instant::now();
     loop {
-        let kernel = kernel_partition_names(&plan.disk.path);
+        let kernel = kernel_partition_names(&plan.disk.path)?;
         let missing_nodes = devices
             .iter()
             .filter(|dev| !Path::new(dev.as_str()).exists())

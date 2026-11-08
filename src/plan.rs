@@ -59,7 +59,7 @@ pub fn build_plan(
 /// A template erases every partition on the disk and creates its own, one
 /// after another from 1 MiB, the last taking the rest (as sfdisk places them).
 fn template_summary(inventory: &InspectResult, partitions: &[PartitionTemplate]) -> Vec<PartitionChange> {
-    let sector = u64::from(inventory.disk.target.logical_sector_bytes.max(512));
+    let sector = u64::from(inventory.disk.target.logical_sector_bytes);
     let (mut start, end) = crate::inspect::new_gpt_usable(inventory.disk.target.size_bytes, sector);
     let erased = inventory.partitions.iter().map(|part| PartitionChange {
         number: part.number,

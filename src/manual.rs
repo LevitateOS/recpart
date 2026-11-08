@@ -337,7 +337,7 @@ pub fn build_manual_plan(
     // remaining partition (deleted ones no longer count).
     // A new table is a fresh GPT one, whatever the disk had.
     let (usable_start, usable_end) = if new_table {
-        crate::inspect::new_gpt_usable(disk.size_bytes, u64::from(disk.logical_sector_bytes.max(512)))
+        crate::inspect::new_gpt_usable(disk.size_bytes, u64::from(disk.logical_sector_bytes))
     } else {
         (inventory.usable_start_bytes, inventory.usable_end_bytes)
     };
@@ -901,7 +901,7 @@ fn plan_swap_file(
 /// written back with their own start, size, type, UUID, name and attributes.
 fn sfdisk_script(inventory: &InspectResult, new_table: bool, planned: &[Planned]) -> String {
     let disk = &inventory.disk.target;
-    let sector = u64::from(disk.logical_sector_bytes.max(512));
+    let sector = u64::from(disk.logical_sector_bytes);
     let mut lines = vec!["label: gpt".to_string()];
     if !new_table {
         if let Some(id) = &inventory.table_id {

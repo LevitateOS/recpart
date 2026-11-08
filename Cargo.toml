@@ -11,6 +11,7 @@ description = "Mode-aware partition planning and apply backend for LevitateOS"
 clap = { version = "4.5", features = ["derive"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+target-root = { path = "../recstrap/target-root" }
 libc = "0.2"
 schemars = { version = "1", optional = true }
 ts-rs = { version = "12", optional = true }

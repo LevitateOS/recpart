@@ -7,6 +7,7 @@ use std::os::unix::fs::FileTypeExt;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use target_root::{is_protected_path, is_root};
 
 /// Where the kernel lists block devices and their partitions and holders.
 const SYS_BLOCK: &str = "/sys/class/block";
@@ -268,45 +269,57 @@ pub fn ensure_disk_not_mounted(path: &Path) -> Result<()> {
 /// devices; this check gives a clear error before anything is touched.
 pub fn ensure_disk_not_in_use(path: &Path) -> Result<()> {
     let canonical = resolve_disk_path(path)?;
+    let unreadable = |what: String, err: std::io::Error| {
+        RecpartError::new(
+            ErrorCode::InvalidTargetDisk,
+            "preflight",
+            "recpart can tell whether the target disk is in use",
+            format!("cannot read {what}: {err}"),
+            "Run recpart apply as root on a system with /sys and /proc mounted.",
+        )
+    };
     let disk_name = canonical
         .file_name()
         .map(|name| name.to_string_lossy().to_string())
-        .unwrap_or_default();
+        .ok_or_else(|| unreadable(canonical.display().to_string(), std::io::Error::other("it names no device")))?;
     let sys_dir = Path::new(SYS_BLOCK).join(&disk_name);
 
     let mut problems = Vec::new();
     let mut devices = vec![(disk_name, sys_dir.clone())];
     devices.extend(
-        partition_names(&sys_dir)
+        partition_names(&sys_dir)?
             .into_iter()
             .map(|name| (name.clone(), sys_dir.join(name))),
     );
     let device_names: Vec<&String> = devices.iter().map(|(name, _)| name).collect();
 
     for (name, dir) in &devices {
-        if let Ok(entries) = fs::read_dir(dir.join("holders")) {
-            for entry in entries.flatten() {
-                problems.push(format!(
-                    "/dev/{name} is held by {}",
-                    entry.file_name().to_string_lossy()
-                ));
-            }
+        // A device without a holders directory has no holders.
+        let holders = target_root::dir_names(&dir.join("holders"))
+            .map_err(|err| unreadable(format!("/dev/{name}'s holders"), err))?;
+        for holder in holders {
+            problems.push(format!("/dev/{name} is held by {}", holder.to_string_lossy()));
         }
     }
 
-    if let Ok(swaps) = fs::read_to_string("/proc/swaps") {
-        for line in swaps.lines().skip(1) {
-            let Some(swap_dev) = line.split_whitespace().next() else {
-                continue;
-            };
-            let swap_path = fs::canonicalize(swap_dev).unwrap_or_else(|_| PathBuf::from(swap_dev));
-            let swap_name = swap_path
-                .file_name()
-                .map(|name| name.to_string_lossy().to_string())
-                .unwrap_or_default();
-            if device_names.contains(&&swap_name) {
-                problems.push(format!("{} is active swap", swap_path.display()));
-            }
+    let swaps = fs::read_to_string("/proc/swaps").map_err(|err| unreadable("/proc/swaps".to_string(), err))?;
+    for line in swaps.lines().skip(1) {
+        let Some(swap_dev) = line.split_whitespace().next() else {
+            continue;
+        };
+        // /proc/swaps escapes spaces in a swap file's name as \040.
+        let swap_dev = PathBuf::from(std::ffi::OsString::from(
+            String::from_utf8_lossy(&target_root::unescape_octal(swap_dev)).into_owned(),
+        ));
+        let swap_path = match fs::canonicalize(&swap_dev) {
+            Ok(path) => path,
+            // A swap file removed while in use is still listed, with " (deleted)".
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(err) => return Err(unreadable(format!("swap '{}'", swap_dev.display()), err)),
+        };
+        let swap_name = swap_path.file_name().map(|name| name.to_string_lossy().to_string());
+        if swap_name.is_some_and(|name| device_names.contains(&&name)) {
+            problems.push(format!("{} is active swap", swap_path.display()));
         }
     }
 
@@ -332,26 +345,32 @@ pub fn ensure_disk_not_in_use(path: &Path) -> Result<()> {
     ))
 }
 
-fn partition_names(disk_sys_dir: &Path) -> Vec<String> {
-    let Ok(entries) = fs::read_dir(disk_sys_dir) else {
-        return Vec::new();
+/// The partitions the kernel lists under a disk's sysfs directory, sorted.
+fn partition_names(disk_sys_dir: &Path) -> Result<Vec<String>> {
+    let fail = |err: std::io::Error| {
+        RecpartError::new(
+            ErrorCode::InvalidTargetDisk,
+            "preflight",
+            "the kernel lists the disk's partitions",
+            err.to_string(),
+            "Run recpart on a system with /sys mounted.",
+        )
     };
-    entries
-        .flatten()
-        .filter(|entry| entry.path().join("partition").exists())
-        .map(|entry| entry.file_name().to_string_lossy().to_string())
-        .collect()
+    let mut names = Vec::new();
+    for name in target_root::dir_names(disk_sys_dir).map_err(fail)? {
+        if target_root::exists(&disk_sys_dir.join(&name).join("partition")).map_err(fail)? {
+            names.push(name.to_string_lossy().to_string());
+        }
+    }
+    Ok(names)
 }
 
 /// Sorted names of the partitions the kernel currently exposes for `disk`.
-pub fn kernel_partition_names(disk: &Path) -> Vec<String> {
-    let name = disk
-        .file_name()
-        .map(|name| name.to_string_lossy().to_string())
-        .unwrap_or_default();
-    let mut names = partition_names(&Path::new(SYS_BLOCK).join(name));
-    names.sort();
-    names
+pub fn kernel_partition_names(disk: &Path) -> Result<Vec<String>> {
+    let Some(name) = disk.file_name() else {
+        return Ok(Vec::new());
+    };
+    partition_names(&Path::new(SYS_BLOCK).join(name))
 }
 
 fn open_exclusive(path: &Path) -> std::io::Result<()> {
@@ -403,7 +422,21 @@ pub(crate) fn query_disk(path: &Path) -> Result<DiskInventory> {
             "Target a disk device (for example /dev/sda), not a partition like /dev/sda1.",
         ));
     }
+    if !valid_sector_bytes(disk.log_sec) {
+        return Err(RecpartError::new(
+            ErrorCode::InvalidTargetDisk,
+            "preflight",
+            "lsblk reports the disk's logical sector size",
+            format!("LOG-SEC is {}", disk.log_sec),
+            "Check the disk with 'lsblk -o PATH,LOG-SEC'; recpart needs a power of two of at least 512 bytes.",
+        ));
+    }
     Ok(disk.into_inventory())
+}
+
+/// A logical sector size recpart can plan with.
+pub(crate) fn valid_sector_bytes(bytes: u32) -> bool {
+    bytes >= 512 && bytes.is_power_of_two()
 }
 
 pub fn query_disk_target(path: &Path) -> Result<DiskTarget> {
@@ -428,75 +461,4 @@ pub fn list_disk_inventory() -> Result<DiskListResult> {
         schema_version: DISK_LIST_SCHEMA_VERSION,
         disks,
     })
-}
-
-/// Protected system paths that should never be extraction/chroot targets.
-///
-/// These are critical system directories that would be destroyed if used
-/// as installation targets. Tools like recstrap and recchroot use this list
-/// to prevent catastrophic user errors.
-const PROTECTED_PATHS: &[&str] = &[
-    "/",
-    "/bin",
-    "/boot",
-    "/boot/efi",
-    "/dev",
-    "/efi",
-    "/etc",
-    "/home",
-    "/lib",
-    "/lib32",
-    "/lib64",
-    "/opt",
-    "/proc",
-    "/root",
-    "/run",
-    "/sbin",
-    "/srv",
-    "/sys",
-    "/tmp",
-    "/usr",
-    "/usr/local",
-    "/var",
-];
-
-/// Check if a path is a protected system path.
-///
-/// The path is resolved first (symlinks via `canonicalize` when it exists,
-/// otherwise `.`/`..` components lexically), so `/mnt/../usr` or a symlink
-/// pointing at `/etc` is caught. Only the resolved path itself is compared;
-/// children such as `/mnt/usr` are NOT protected.
-fn is_protected_path(path: &std::path::Path) -> bool {
-    let resolved = resolve_for_protection(path);
-    PROTECTED_PATHS
-        .iter()
-        .any(|protected| resolved == std::path::Path::new(protected))
-}
-
-fn resolve_for_protection(path: &std::path::Path) -> std::path::PathBuf {
-    use std::path::{Component, PathBuf};
-
-    if let Ok(canonical) = std::fs::canonicalize(path) {
-        return canonical;
-    }
-
-    let mut out = PathBuf::new();
-    for component in path.components() {
-        match component {
-            Component::CurDir => {}
-            Component::ParentDir => {
-                out.pop();
-            }
-            other => out.push(other.as_os_str()),
-        }
-    }
-    if out.as_os_str().is_empty() {
-        out.push("/");
-    }
-    out
-}
-
-fn is_root() -> bool {
-    // SAFETY: geteuid has no preconditions.
-    unsafe { libc::geteuid() == 0 }
 }
