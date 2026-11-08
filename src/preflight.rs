@@ -358,7 +358,12 @@ fn partition_names(disk_sys_dir: &Path) -> Result<Vec<String>> {
     };
     let mut names = Vec::new();
     for name in target_root::dir_names(disk_sys_dir).map_err(fail)? {
-        if target_root::exists(&disk_sys_dir.join(&name).join("partition")).map_err(fail)? {
+        let child = disk_sys_dir.join(&name);
+        // sysfs also contains attribute files and links to other devices.
+        // Only child directories can describe this disk's partitions.
+        let metadata = fs::symlink_metadata(&child)
+            .map_err(|err| fail(target_root::at(&child, err)))?;
+        if metadata.is_dir() && target_root::exists(&child.join("partition")).map_err(fail)? {
             names.push(name.to_string_lossy().to_string());
         }
     }
