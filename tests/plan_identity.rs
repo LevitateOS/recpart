@@ -100,6 +100,22 @@ fn write(dir: &Path, name: &str, value: &Value) -> PathBuf {
     path
 }
 
+#[test]
+fn human_plan_explains_data_loss_sizes_and_preview() {
+    let dir = tempfile::tempdir().unwrap();
+    let original = gpt_inventory();
+    let inventory = write(dir.path(), "inventory.json", &original);
+    let output = run_recpart(&["plan", "--disk", DISK, "--inventory", inventory.to_str().unwrap()]);
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    let text = String::from_utf8(output.stdout).unwrap();
+    assert!(text.contains("Preview only: no changes made."));
+    assert!(text.contains("64.0 GiB"));
+    assert!(text.contains("erases all existing partitions"));
+    assert!(text.contains("10.0 GiB, ext4 -> absent"));
+    assert!(text.contains("--dry-run"));
+    assert_eq!(serde_json::from_str::<Value>(&std::fs::read_to_string(inventory).unwrap()).unwrap(), original);
+}
+
 fn plan(inventory: &Path, extra: &[&str]) -> Output {
     let mut args = vec!["plan", "--disk", DISK, "--inventory", inventory.to_str().unwrap()];
     args.extend(extra);

@@ -12,7 +12,7 @@ fn main() -> ExitCode {
             if json {
                 eprintln!("{}", to_json(&err.payload()));
             } else {
-                eprintln!("recpart: {}", err);
+                eprintln!("recpart: {} [{}]\n  Expected: {}\n  Found: {}\n  Next: {}", err.code, err.component, err.expectation, err.observed, err.remediation);
             }
             ExitCode::from(err.code.exit_status())
         }

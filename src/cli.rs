@@ -15,7 +15,8 @@ use std::path::PathBuf;
 #[derive(Debug, Parser)]
 #[command(name = "recpart")]
 #[command(version)]
-#[command(about = "Mode-aware partition planning and apply backend")]
+#[command(about = "Inspect disks, preview partition changes, and prepare an installation target")]
+#[command(after_help = "Start here:\n  recpart list-disks\n  recpart inspect --disk /dev/sda\n  recpart plan --disk /dev/sda --mode ab\n  recpart apply --disk /dev/sda --mode ab --dry-run\n\nplan and --dry-run leave the disk unchanged. The default layout replaces all\npartitions; --layout supplies a custom layout. Read the plan before applying.\nRun 'recpart <command> --help' for options; add --json for scripts.")]
 pub struct Cli {
     /// Emit machine-readable JSON (errors too, on stderr)
     #[arg(long, global = true)]
@@ -32,9 +33,10 @@ pub enum Commands {
     /// Show a disk's partition table, partitions (filesystem, used space,
     /// mounts) and free gaps.
     Inspect(InspectArgs),
-    /// Generate a deterministic partition plan.
+    /// Preview partition changes without changing the disk.
     Plan(PlanArgs),
-    /// Apply a partition plan directly to disk.
+    /// Partition, format and mount the target (requires --confirm DESTROY).
+    #[command(after_help = "Preview first:\n  recpart apply --disk /dev/sda --mode ab --dry-run\n\nTo bind apply to a reviewed plan:\n  recpart plan --disk /dev/sda --mode ab --json > plan.json\n  recpart apply --disk /dev/sda --mode ab --expect plan.json --confirm DESTROY\n\nUse the same disk, mode, sizes and --layout for both commands. DESTROY authorizes\nthe changes listed in the plan, including deletion and formatting.")]
     Apply(ApplyArgs),
 }
 
@@ -125,11 +127,14 @@ fn run_list_disks(json: bool) -> Result<()> {
         println!("{}", to_json(&inventory));
     } else {
         println!("recpart candidate disks");
+        if inventory.disks.is_empty() {
+            println!("  No candidate disks found. Check that the target disk is connected and visible to lsblk.");
+        }
         for disk in &inventory.disks {
             println!("  {}", disk.target.path.display());
             println!(
-                "    size: {} bytes (logical {} / physical {})",
-                disk.target.size_bytes, disk.target.logical_sector_bytes, disk.target.physical_sector_bytes
+                "    size: {} ({} bytes; sectors: logical {} / physical {})",
+                human_size(disk.target.size_bytes), disk.target.size_bytes, disk.target.logical_sector_bytes, disk.target.physical_sector_bytes
             );
             println!(
                 "    model: {} | transport: {} | read-only: {}",
@@ -137,10 +142,23 @@ fn run_list_disks(json: bool) -> Result<()> {
                 disk.transport,
                 if disk.read_only { "yes" } else { "no" }
             );
+            println!("    serial: {} | removable: {}", disk.serial, if disk.removable { "yes" } else { "no" });
+        }
+        if !inventory.disks.is_empty() {
+            println!("\nNext: recpart inspect --disk <DEVICE> to check a disk's existing partitions.");
         }
     }
 
     Ok(())
+}
+
+fn human_size(bytes: u64) -> String {
+    for (unit, scale) in [("TiB", 1u64 << 40), ("GiB", 1u64 << 30), ("MiB", 1u64 << 20), ("KiB", 1u64 << 10)] {
+        if bytes >= scale {
+            return format!("{:.1} {unit}", bytes as f64 / scale as f64);
+        }
+    }
+    format!("{bytes} bytes")
 }
 
 fn run_inspect(args: InspectArgs, json: bool) -> Result<()> {
@@ -157,6 +175,10 @@ fn run_inspect(args: InspectArgs, json: bool) -> Result<()> {
         inventory.table,
         inventory.table_id.as_deref().map(|id| format!(" {id}")).unwrap_or_default()
     );
+    println!("  NUM DEVICE           START (MiB)       SIZE (MiB)  FS     LABEL        USED       MOUNTS");
+    if inventory.partitions.is_empty() {
+        println!("  No partitions found.");
+    }
     for part in &inventory.partitions {
         println!(
             "  {:>3} {:<16} start {:>8} MiB  size {:>8} MiB  {:<6} {:<12} used {:<10} {}",
@@ -201,10 +223,14 @@ fn run_plan(args: PlanArgs, json: bool) -> Result<()> {
         println!("{}", to_json(&plan));
     } else {
         println!("recpart plan");
+        println!("  Preview only: no changes made.");
         println!("  mode: {}", plan.mode);
         println!("  disk: {}", plan.disk.path.display());
-        println!("  size: {} bytes", plan.disk.size_bytes);
+        println!("  size: {} ({} bytes)", human_size(plan.disk.size_bytes), plan.disk.size_bytes);
         println!("  serial: {}", plan.disk_serial);
+        if plan.wipes_disk {
+            println!("\nWARNING: applying this plan replaces the partition table and erases all existing partitions on {}.", plan.disk.path.display());
+        }
         println!("\nPartitions:");
         for change in &plan.summary {
             println!(
@@ -217,6 +243,8 @@ fn run_plan(args: PlanArgs, json: bool) -> Result<()> {
                     .map(|r| format!("{} {}", r.as_str(), change.mountpoint.as_deref().unwrap_or("")))
                     .unwrap_or_default()
             );
+            let state = |s: &crate::types::PartitionState| format!("{}, {}", human_size(s.size_bytes), s.filesystem.as_deref().unwrap_or("no filesystem"));
+            println!("      {} -> {}", change.before.as_ref().map(state).unwrap_or_else(|| "absent".into()), change.after.as_ref().map(state).unwrap_or_else(|| "absent".into()));
         }
         if let Some(file) = &plan.swap_file {
             println!("  swap file {} ({} MiB)", file.path, file.size_mb);
@@ -226,6 +254,7 @@ fn run_plan(args: PlanArgs, json: bool) -> Result<()> {
         }
         println!("\nGenerated sfdisk script:\n");
         print!("{}", plan.sfdisk_script);
+        println!("\nNext: use 'recpart apply' with the same options and --dry-run to preview commands.");
     }
 
     Ok(())
@@ -439,6 +468,11 @@ fn run_apply(args: ApplyArgs, json: bool) -> Result<()> {
         println!("  mode: {}", result.mode);
         println!("  disk: {}", result.disk.path.display());
         println!("  dry-run: {}", result.dry_run);
+        if result.dry_run {
+            println!("  Preview only: no changes made; the install target below is not mounted by this run.");
+        } else {
+            println!("  Partition changes completed and target filesystems mounted.");
+        }
         println!("\nSteps:");
         for step in &result.steps {
             println!("  [{}] {}", step.phase, step.command);

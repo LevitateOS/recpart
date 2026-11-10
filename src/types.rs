@@ -165,19 +165,19 @@ pub struct PartitionPlan {
 #[cfg_attr(feature = "contracts", derive(schemars::JsonSchema, ts_rs::TS))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default, clap::Args)]
 pub struct LayoutRequest {
-    /// EFI partition size in MB
+    /// EFI partition size in MiB (1024 * 1024 bytes)
     #[arg(long)]
     pub efi_size_mb: Option<u32>,
-    /// Mutable root partition size in MB (mutable mode only)
+    /// Mutable root partition size in MiB (mutable mode only)
     #[arg(long)]
     pub root_size_mb: Option<u32>,
-    /// A/B slot A partition size in MB (ab mode only)
+    /// A/B slot A partition size in MiB (ab mode only)
     #[arg(long)]
     pub root_a_size_mb: Option<u32>,
-    /// A/B slot B partition size in MB (ab mode only)
+    /// A/B slot B partition size in MiB (ab mode only)
     #[arg(long)]
     pub root_b_size_mb: Option<u32>,
-    /// A/B state partition size in MB (ab mode only). Omit to use remaining space.
+    /// A/B state partition size in MiB (ab mode only). Omit to use remaining space.
     #[arg(long)]
     pub state_size_mb: Option<u32>,
 }
