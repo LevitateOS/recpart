@@ -341,7 +341,7 @@
       "description": "Partition sizes the caller asked for; unset sizes take the policy default.\nThe fields are also recpart's `--<field>` CLI flags.",
       "properties": {
         "efi_size_mb": {
-          "description": "EFI partition size in MB",
+          "description": "EFI partition size in MiB (1024 * 1024 bytes)",
           "format": "uint32",
           "minimum": 0,
           "type": [
@@ -350,7 +350,7 @@
           ]
         },
         "root_a_size_mb": {
-          "description": "A/B slot A partition size in MB (ab mode only)",
+          "description": "A/B slot A partition size in MiB (ab mode only)",
           "format": "uint32",
           "minimum": 0,
           "type": [
@@ -359,7 +359,7 @@
           ]
         },
         "root_b_size_mb": {
-          "description": "A/B slot B partition size in MB (ab mode only)",
+          "description": "A/B slot B partition size in MiB (ab mode only)",
           "format": "uint32",
           "minimum": 0,
           "type": [
@@ -368,7 +368,7 @@
           ]
         },
         "root_size_mb": {
-          "description": "Mutable root partition size in MB (mutable mode only)",
+          "description": "Mutable root partition size in MiB (mutable mode only)",
           "format": "uint32",
           "minimum": 0,
           "type": [
@@ -377,7 +377,7 @@
           ]
         },
         "state_size_mb": {
-          "description": "A/B state partition size in MB (ab mode only). Omit to use remaining space.",
+          "description": "A/B state partition size in MiB (ab mode only). Omit to use remaining space.",
           "format": "uint32",
           "minimum": 0,
           "type": [
