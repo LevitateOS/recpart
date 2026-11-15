@@ -16,14 +16,14 @@ both live ISOs ship it as the `disk-plan` command.
 
 - Provide a safe disk partition workflow for backend consumers.
 - Support two layout modes:
-  - `ab` (default): A/B immutable-ready partition layout.
+  - `ab` (default): A/B layout: two roots, the booted one locked and the other unlocked.
   - `mutable`: classic mutable root layout.
 - Preview exact commands/scripts before destructive actions.
 - Fail fast with explicit diagnostics and remediation.
 
 ## Non-Goals
 
-- Slot switching or commit/rollback state machine.
+- Choosing which root boots, or copying one root to the other (recab owns both).
 - Integrity policy enforcement (dm-verity, signature verification, measured boot).
 - Full install automation (rootfs extraction, chroot config, service enablement).
 

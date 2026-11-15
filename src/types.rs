@@ -16,7 +16,7 @@ pub const CONFIRM_TOKEN: &str = "DESTROY";
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, clap::ValueEnum)]
 #[serde(rename_all = "snake_case")]
 pub enum InstallMode {
-    /// A/B immutable-ready layout: two root slots for atomic updates and rollback.
+    /// A/B layout: two roots; the booted one is locked, the other unlocked for changes.
     #[default]
     Ab,
     /// Classic layout with one mutable root.
@@ -385,7 +385,7 @@ pub enum Role {
     Root,
     /// A/B root slot A, installed now and mounted at / (ext4).
     RootA,
-    /// A/B root slot B, left unmounted for updates (ext4).
+    /// A/B root slot B, a copy of A once installed: the unlocked other root while A is booted (ext4).
     RootB,
     /// The persistent /var: the A/B state partition, or a mutable install's own /var (ext4).
     State,

@@ -252,7 +252,7 @@
         },
         {
           "const": "root_b",
-          "description": "A/B root slot B, left unmounted for updates (ext4).",
+          "description": "A/B root slot B, a copy of A once installed: the unlocked other root while A is booted (ext4).",
           "type": "string"
         },
         {

@@ -34,7 +34,7 @@ layout orchestration and safe handoff to existing installation tools.
 `recpart` provides a guided, deterministic, and safe partitioning flow for
 LevitateOS installation, with explicit mode choice:
 
-- `ab` (default): A/B immutable-ready disk layout
+- `ab` (default): A/B disk layout: two roots (the booted one locked, the other unlocked) and a shared `/var`
 - `mutable`: classic mutable-root layout
 
 ### 1.2 Scope
@@ -52,7 +52,7 @@ This specification does not cover:
 - Rootfs extraction and payload installation (`recstrap`)
 - fstab generation (`recfstab`)
 - chroot setup (`recchroot`)
-- slot state machine (`recab`)
+- the two roots once installed (`recab`)
 - immutability/integrity enforcement policy
 
 ### 1.3 Responsibility Boundary
@@ -61,7 +61,7 @@ This specification does not cover:
 formatting, and mount orchestration.
 
 **REQ-SCOPE-002**: `recpart` MUST NOT implement full installation workflows or
-slot commit/rollback semantics.
+choose which root boots (recab owns the two roots).
 
 ---
 
@@ -69,7 +69,7 @@ slot commit/rollback semantics.
 
 | Term | Definition |
 |------|------------|
-| `ab` mode | A/B immutable-ready partition model with separate slot roots. |
+| `ab` mode | A/B partition model: two roots, the booted one locked and the other unlocked, and a shared `/var`. |
 | `mutable` mode | Traditional single writable root model. |
 | Plan | Deterministic storage layout and execution intent generated before applying changes. |
 | Apply | Destructive execution of the approved plan on the target disk. |
