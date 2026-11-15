@@ -76,7 +76,7 @@ impl Filesystem {
     pub const ALL: &'static [Filesystem] = &[Filesystem::Vfat, Filesystem::Ext4, Filesystem::Swap];
 
     /// The program and arguments that make this filesystem, labelled, on a
-    /// device given last (recpart's formatting, and recab's staging of a slot).
+    /// device given last (recpart's formatting, and recab's copy into the other root).
     pub fn mkfs(self, label: Option<&str>) -> (&'static str, Vec<String>) {
         let (program, mut args): (&str, Vec<String>) = match self {
             Filesystem::Vfat => ("mkfs.vfat", vec!["-F".into(), "32".into()]),

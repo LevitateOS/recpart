@@ -2,7 +2,7 @@
 
 **Version:** 0.1.0  
 **Status:** Draft  
-**Last Updated:** 2026-11-07
+**Last Updated:** 2026-11-15
 
 This document defines the requirements for `recpart`: a partitioning and
 mount-preparation wizard for LevitateOS install workflows. `recpart` is
@@ -113,8 +113,9 @@ actionable and explicit.
 
 ## 4. UI and UX Requirements
 
-`tui/apps/install/disk-plan` renders recpart's JSON as a page flow (`src/flow.ts`);
-it ships on no ISO yet. recpart's part is the JSON contract it renders.
+`tools/tui/apps/install/disk-plan` renders recpart's JSON as a page flow
+(`src/flow.ts`); both live ISOs ship it as `disk-plan`. recpart's part is the
+JSON contract it renders.
 
 ---
 
@@ -131,12 +132,12 @@ it ships on no ISO yet. recpart's part is the JSON contract it renders.
 **REQ-MODE-010**: `ab` mode MUST produce a layout that includes:
 
 - EFI system partition
-- Root slot A partition
-- Root slot B partition
+- Root A partition
+- Root B partition
 - Persistent writable partition(s) needed by policy
 
-**REQ-MODE-011**: `ab` mode output MUST identify active vs inactive install
-target semantics for downstream tooling.
+**REQ-MODE-011**: `ab` mode output MUST say which root the system is installed
+into (root A) and which is left for recab to copy into, for downstream tooling.
 
 ### 5.3 Mutable Layout Intent
 
@@ -164,7 +165,7 @@ root B, state, home, swap, other at a mount point), and MUST leave every
 partition no action names untouched.
 
 **REQ-MODE-051**: The plan MUST check the layout against the mode (`ab`: EFI,
-two root slots of equal size and state; `mutable`: EFI and root), the minimum
+two roots of equal size and state; `mutable`: EFI and root), the minimum
 sizes, 4 KiB alignment, mount points used once, and that the EFI partition is
 FAT with room for the mode's kernels. Each refusal MUST carry its code and a
 remediation.
@@ -251,8 +252,9 @@ prints intended changes without modifying disk state.
 target and mounts as data; the next steps belong to the installer UI and live
 docs, not to recpart.
 
-**REQ-HANDOFF-002**: For `ab` mode, handoff output MUST include slot-target
-context needed by downstream A/B-aware tooling (`recab` and wrappers).
+**REQ-HANDOFF-002**: For `ab` mode, handoff output MUST include the devices of
+root A and root B, which downstream A/B-aware tooling (`recsetup`, `recab`)
+needs.
 
 ### 8.2 Structured Result
 
@@ -295,13 +297,13 @@ and MUST delegate that responsibility to dedicated policy tools.
 
 ## 11. Validation
 
-Unit tests are prohibited. Choose focused validation for the behavior being changed:
+Unit tests are prohibited (see the superproject `AGENTS.md`). Choose focused validation for the behavior being changed:
 
 - `cargo check -p recpart` for compilation.
 - `cargo test -p recpart --test integration_cli` for the actual CLI and JSON contract.
 - `tests/loop_disk.rs` (root) for plan, dry-run and apply on a loop device.
 - `plan`/`apply --dry-run` with `--inventory` against the fixture disks in
-  `tui/apps/install/disk-plan/fixtures` (`record.sh` re-records them): manual
+  `tools/tui/apps/install/disk-plan/fixtures` (`record.sh` re-records them): manual
   layouts, a shrink with dual boot, and each layout refusal. A generated
   `sfdisk_script` can be checked by feeding it to `sfdisk` on a sparse image
   file, which needs no root.

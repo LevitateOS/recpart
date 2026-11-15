@@ -30,7 +30,7 @@ pub fn build_handoff(plan: &PartitionPlan, mounted: Vec<MountMapping>, swaps: Ve
             let slot = |name: &str| plan.partitions.iter().find(|p| p.name == name);
             let device_of = |name: &str| slot(name).map(|p| partition_device(&plan.disk.path, p.index.into()));
             // The slot installed now is the one mounted at "/"; the other is
-            // left unmounted for later updates.
+            // left unmounted; recab init copies root A into it.
             let target_slot = |name: &str| slot(name).is_some_and(|p| p.mountpoint == ROOT_MOUNT);
             let (install_target_slot, inactive_slot_hint) = if target_slot(Role::RootA.as_str()) {
                 ("A", "B")

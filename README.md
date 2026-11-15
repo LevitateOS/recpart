@@ -9,8 +9,10 @@ It does not perform full OS installation.
 
 ## Frontend
 
-An interactive flow over recpart's JSON lives at `tui/apps/install/disk-plan`;
-both live ISOs ship it as the `disk-plan` command.
+An interactive flow over recpart's JSON lives at `tools/tui/apps/install/disk-plan`;
+both live ISOs ship it as the `disk-plan` command, one of the helper apps beside
+the installation guide. Using it is an alternative to the manual commands, not a
+step after them.
 
 ## Goals
 
@@ -24,6 +26,7 @@ both live ISOs ship it as the `disk-plan` command.
 ## Non-Goals
 
 - Choosing which root boots, or copying one root to the other (recab owns both).
+- Booting: apply leaves a mounted target, not an installed system. The boot files and verification come later (`recsetup`, `recab`).
 - Integrity policy enforcement (dm-verity, signature verification, measured boot).
 - Full install automation (rootfs extraction, chroot config, service enablement).
 
@@ -84,7 +87,7 @@ the disk, with `offset_bytes` 0. The table's own signatures (`gpt`, `PMBR`,
   `root_a`, `root_b` (the same size) and `state`; `mutable` needs `efi` and
   `root`. Roots and state are always formatted; the minimum sizes, mount
   points used twice, 4 KiB alignment, and the EFI partition (FAT, an EFI
-  system partition, with room for the mode's kernels: 128 MiB per slot plus
+  system partition, with room for the mode's kernels: 128 MiB per root plus
   8 MiB) are checked too. A kept EFI partition (dual boot) is mounted, not
   formatted. Resizes: ext4 (`e2fsck -f` + `resize2fs`, offline), FAT
   (`fatresize`) and NTFS (`ntfsresize`, which refuses a hibernated or unclean
@@ -103,7 +106,7 @@ erased"; otherwise it is empty. `apply` runs it:
 shrink, write the table (after `wipefs -a` when the whole disk is erased),
 grow, format, mount at `<mount-root>` (`/mnt` by default), then `swapon` the swap
 partitions and swap file so recfstab finds them; it reports a structured
-handoff (install target, mounts, swaps, A/B slot devices). `apply --dry-run`
+handoff (install target, mounts, swaps, the devices of root A and root B). `apply --dry-run`
 lists the steps and what apply would refuse.
 
 `apply` plans again from the disk as it is now. `--expect <file>` ties it to
@@ -123,7 +126,7 @@ UI's and live docs'.
 `--inventory <file>` plans and dry-runs against a recorded `inspect --json`
 document instead of the disk (the live-disk checks are skipped and the dry
 run says so); a real apply refuses it. disk-plan's stand-in
-(`tui/apps/install/disk-plan/fixtures`) records its documents this way.
+(`tools/tui/apps/install/disk-plan/fixtures`) records its documents this way.
 
 ## Integration Contract
 
