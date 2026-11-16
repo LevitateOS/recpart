@@ -350,7 +350,7 @@
           ]
         },
         "root_a_size_mb": {
-          "description": "A/B slot A partition size in MiB (ab mode only)",
+          "description": "A/B root A partition size in MiB (ab mode only)",
           "format": "uint32",
           "minimum": 0,
           "type": [
@@ -359,7 +359,7 @@
           ]
         },
         "root_b_size_mb": {
-          "description": "A/B slot B partition size in MiB (ab mode only)",
+          "description": "A/B root B partition size in MiB (ab mode only)",
           "format": "uint32",
           "minimum": 0,
           "type": [
@@ -626,12 +626,12 @@
         },
         {
           "const": "root_a",
-          "description": "A/B root slot A, installed now and mounted at / (ext4).",
+          "description": "A/B root A, installed now and mounted at / (ext4).",
           "type": "string"
         },
         {
           "const": "root_b",
-          "description": "A/B root slot B, a copy of A once installed: the unlocked other root while A is booted (ext4).",
+          "description": "A/B root B, a copy of A once installed: the unlocked other root while A is booted (ext4).",
           "type": "string"
         },
         {

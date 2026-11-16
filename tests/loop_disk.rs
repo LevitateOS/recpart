@@ -112,7 +112,7 @@ fn ab_layout_is_planned_applied_and_handed_off() {
         roles.iter().map(|r| format!("{} {}", r.label().unwrap(), r.filesystem().as_str())).collect();
     assert_eq!(seen, expected);
 
-    // ...and the handoff names what is really mounted, slot B left unmounted.
+    // ...and the handoff names what is really mounted, root B left unmounted.
     assert_eq!(applied.handoff.install_target, mount_root);
     for mount in &applied.handoff.mount_map {
         let source = run("findmnt", &["-nr", "-o", "SOURCE", "--mountpoint", &mount.path]);

@@ -171,10 +171,10 @@ pub struct LayoutRequest {
     /// Mutable root partition size in MiB (mutable mode only)
     #[arg(long)]
     pub root_size_mb: Option<u32>,
-    /// A/B slot A partition size in MiB (ab mode only)
+    /// A/B root A partition size in MiB (ab mode only)
     #[arg(long)]
     pub root_a_size_mb: Option<u32>,
-    /// A/B slot B partition size in MiB (ab mode only)
+    /// A/B root B partition size in MiB (ab mode only)
     #[arg(long)]
     pub root_b_size_mb: Option<u32>,
     /// A/B state partition size in MiB (ab mode only). Omit to use remaining space.
@@ -383,9 +383,9 @@ pub enum Role {
     Efi,
     /// The one root of a mutable install, at / (ext4).
     Root,
-    /// A/B root slot A, installed now and mounted at / (ext4).
+    /// A/B root A, installed now and mounted at / (ext4).
     RootA,
-    /// A/B root slot B, a copy of A once installed: the unlocked other root while A is booted (ext4).
+    /// A/B root B, a copy of A once installed: the unlocked other root while A is booted (ext4).
     RootB,
     /// The persistent /var: the A/B state partition, or a mutable install's own /var (ext4).
     State,

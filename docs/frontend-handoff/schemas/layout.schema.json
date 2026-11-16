@@ -247,12 +247,12 @@
         },
         {
           "const": "root_a",
-          "description": "A/B root slot A, installed now and mounted at / (ext4).",
+          "description": "A/B root A, installed now and mounted at / (ext4).",
           "type": "string"
         },
         {
           "const": "root_b",
-          "description": "A/B root slot B, a copy of A once installed: the unlocked other root while A is booted (ext4).",
+          "description": "A/B root B, a copy of A once installed: the unlocked other root while A is booted (ext4).",
           "type": "string"
         },
         {
